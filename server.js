@@ -141,15 +141,13 @@ server.listen(PORT, async () => {
   console.log(`Run mode: ${process.env.RUN_MODE || 'dry_run'}`);
   console.log('');
 
-  // Start tunnel
-  try {
-    const tunnel = await startTunnel(PORT);
+  // Start tunnel (non-blocking — server works fine without it)
+  startTunnel(PORT).then(tunnel => {
     console.log(`Tunnel URL: ${tunnel.url}`);
-  } catch (err) {
-    console.log(`[tunnel] Could not start tunnel: ${err.message}`);
-    console.log('[tunnel] The server is still running locally on port ' + PORT);
-    console.log('[tunnel] Install cloudflared manually or check your connection');
-  }
+  }).catch(err => {
+    console.log(`[tunnel] Skipped: ${err.message}`);
+    console.log('[tunnel] Server is running locally — tunnel not required.');
+  });
 
   console.log('');
   console.log('Endpoints:');
