@@ -241,55 +241,132 @@ async function clickUncontactedFilter() {
   return false;
 }
 
-async function getCandidateCards() {
-  // Scroll down repeatedly to load all visible candidate cards (LinkedIn lazy-loads them)
+async function scrollToLoadAllCards() {
+  // LinkedIn Recruiter lazy-loads candidate cards as you scroll.
+  // We need to find the right scrollable container and scroll it repeatedly.
+  const MAX_SCROLL_ATTEMPTS = 30;
   let previousCount = 0;
-  let scrollAttempts = 0;
-  const MAX_SCROLL_ATTEMPTS = 20;
+  let stableRounds = 0;
 
-  while (scrollAttempts < MAX_SCROLL_ATTEMPTS) {
+  for (let attempt = 0; attempt < MAX_SCROLL_ATTEMPTS; attempt++) {
     const cards = await trySelectorAll(page, SELECTORS.candidateCards, { timeout: 10000 });
     const currentCount = cards.length;
-    console.log(`[candidates] Scroll ${scrollAttempts + 1}: found ${currentCount} cards`);
+    console.log(`[scroll] Attempt ${attempt + 1}: ${currentCount} cards visible`);
 
-    if (currentCount === 0 && scrollAttempts === 0) {
-      console.log('[candidates] No candidate cards found, taking screenshot for debugging');
+    if (currentCount === 0 && attempt === 0) {
+      console.log('[scroll] No cards found on first attempt, taking debug screenshot');
       await takeScreenshot('no-candidates');
+      return [];
     }
 
-    if (currentCount > 0 && currentCount === previousCount) {
-      // No new cards loaded after scroll — check for "Next" / pagination button
-      const nextBtn = await page.$('button[aria-label*="Next"], button[aria-label*="next"], [class*="pagination"] button:last-child, button[class*="next"]');
-      if (nextBtn) {
-        const isDisabled = await nextBtn.getAttribute('disabled');
-        if (!isDisabled) {
-          console.log('[candidates] Clicking next page...');
-          await nextBtn.click();
-          await page.waitForTimeout(3000);
-          scrollAttempts++;
-          previousCount = 0; // Reset — new page will have fresh cards
-          continue;
-        }
+    if (currentCount === previousCount) {
+      stableRounds++;
+      if (stableRounds >= 3) {
+        console.log(`[scroll] Card count stable at ${currentCount} for 3 rounds — done scrolling`);
+        break;
       }
-      // No more cards to load
-      break;
+    } else {
+      stableRounds = 0;
     }
-
     previousCount = currentCount;
-    scrollAttempts++;
 
-    // Scroll to bottom to trigger lazy loading
+    // Scroll multiple containers — LinkedIn Recruiter uses various scrollable wrappers
     await page.evaluate(() => {
-      const scrollable = document.querySelector('[class*="pipeline"], [class*="list"], main, [role="main"]') || document.documentElement;
-      scrollable.scrollTop = scrollable.scrollHeight;
+      // Strategy 1: Scroll the main content area / pipeline list
+      const containers = [
+        document.querySelector('.hiring-pipeline-candidates'),
+        document.querySelector('[class*="pipeline-candidates"]'),
+        document.querySelector('[class*="hiring-pipeline"] [class*="list"]'),
+        document.querySelector('[class*="manage-candidates"]'),
+        document.querySelector('main'),
+        document.querySelector('[role="main"]'),
+        document.querySelector('.scaffold-layout__main'),
+        document.querySelector('[class*="scaffold"] [class*="main"]'),
+      ].filter(Boolean);
+
+      for (const el of containers) {
+        el.scrollTop = el.scrollHeight;
+      }
+      // Strategy 2: Also scroll the window itself
       window.scrollTo(0, document.body.scrollHeight);
     });
-    await page.waitForTimeout(2000);
+
+    // Also try scrolling the last visible card into view
+    const lastCard = cards[cards.length - 1];
+    if (lastCard) {
+      try {
+        await lastCard.scrollIntoViewIfNeeded();
+      } catch (e) { /* ignore */ }
+    }
+
+    await page.waitForTimeout(1500);
   }
 
   const finalCards = await trySelectorAll(page, SELECTORS.candidateCards, { timeout: 5000 });
-  console.log(`[candidates] Final count: ${finalCards.length} cards after ${scrollAttempts} scroll(s)`);
+  console.log(`[scroll] Final: ${finalCards.length} cards loaded on this page`);
   return finalCards;
+}
+
+// Pagination selectors for LinkedIn Recruiter
+const PAGINATION_SELECTORS = {
+  nextButton: [
+    'a:has-text("Next")',
+    'button:has-text("Next")',
+    'li.artdeco-pagination__indicator--number:last-child a',
+    '[class*="pagination"] a:has-text("Next")',
+    '[class*="pagination"] button:has-text("Next")',
+    'a[aria-label*="Next"]',
+    'button[aria-label*="Next"]',
+    '[class*="pagination"] li:last-child a',
+  ],
+  pageNumbers: [
+    'li.artdeco-pagination__indicator--number a',
+    '[class*="pagination"] li a',
+    '[class*="pagination"] button[aria-label*="Page"]',
+  ],
+};
+
+async function getNextPageButton() {
+  for (const sel of PAGINATION_SELECTORS.nextButton) {
+    try {
+      const btn = await page.$(sel);
+      if (btn) {
+        const isVisible = await btn.isVisible();
+        if (isVisible) {
+          // Check if disabled
+          const isDisabled = await btn.getAttribute('disabled');
+          const ariaDisabled = await btn.getAttribute('aria-disabled');
+          if (!isDisabled && ariaDisabled !== 'true') {
+            return btn;
+          }
+        }
+      }
+    } catch (e) { /* try next selector */ }
+  }
+  return null;
+}
+
+async function getCurrentPageInfo() {
+  // Try to read "1 – 25" style indicator
+  try {
+    const rangeText = await page.$eval(
+      '[class*="results-context"], [class*="displaying"], [class*="pagination-text"], [class*="page-range"]',
+      el => el.textContent.trim()
+    );
+    if (rangeText) return rangeText;
+  } catch (e) { /* ignore */ }
+  return 'unknown';
+}
+
+async function getCandidateCards() {
+  // Phase 1: Load all cards on current page via scrolling
+  let allCards = await scrollToLoadAllCards();
+  console.log(`[candidates] Page 1: ${allCards.length} cards`);
+
+  // Note: We return only the current page's cards here.
+  // Pagination across pages is handled in the main run loop.
+  // This keeps the DOM refs fresh (navigating pages invalidates old refs).
+  return allCards;
 }
 
 async function extractCandidateInfo(card) {
@@ -593,13 +670,13 @@ async function runOutreach(options = {}) {
     await clickUncontactedFilter();
     await takeScreenshot('uncontacted-filter');
 
-    // Get candidate cards (with scroll/pagination)
+    // Get candidate cards on first page (with scrolling to load all)
     let cards = await getCandidateCards();
-    let total = Math.min(cards.length, maxCandidates);
-    console.log(`[run] Found ${cards.length} candidates, processing up to ${total}`);
-    broadcast('candidates_found', { total: cards.length, processing: total });
+    const pageInfo = await getCurrentPageInfo();
+    console.log(`[run] Page 1: ${cards.length} candidates loaded (${pageInfo})`);
+    broadcast('candidates_found', { total: cards.length, processing: Math.min(cards.length, maxCandidates) });
 
-    if (total === 0) {
+    if (cards.length === 0) {
       store.updateRun(runId, { status: 'completed', finished_at: new Date().toISOString() });
       broadcast('run_completed', { runId, processed: 0 });
       return { runId, processed: 0, status: 'completed' };
@@ -607,6 +684,7 @@ async function runOutreach(options = {}) {
 
     let processed = 0, succeeded = 0, failed = 0, skipped = 0;
     let cardIndex = 0;
+    let currentPage = 1;
 
     while (processed < maxCandidates) {
       if (stopRequested) {
@@ -615,38 +693,41 @@ async function runOutreach(options = {}) {
         break;
       }
 
-      // Re-query cards to handle stale DOM refs (after scroll/page change)
+      // If we've exhausted cards on this page, try next page
       if (cardIndex >= cards.length) {
-        // Try to load more via scroll or pagination
-        const prevCount = cards.length;
-        const nextBtn = await page.$('button[aria-label*="Next"], button[aria-label*="next"], [class*="pagination"] button:last-child, button[class*="next"]');
-        if (nextBtn) {
-          const isDisabled = await nextBtn.getAttribute('disabled');
-          if (!isDisabled) {
-            console.log('[run] Navigating to next page...');
-            await nextBtn.click();
-            await page.waitForTimeout(3000);
-            cards = await trySelectorAll(page, SELECTORS.candidateCards, { timeout: 10000 });
-            cardIndex = 0;
-            if (cards.length === 0) {
-              console.log('[run] No more candidates on next page');
-              break;
-            }
-            console.log(`[run] Next page: ${cards.length} candidates`);
-            continue;
-          }
-        }
-        // No next page — try scrolling
+        console.log(`[run] Finished page ${currentPage} (${cards.length} cards). Looking for next page...`);
+
+        // Scroll to bottom to make pagination visible
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await page.waitForTimeout(2000);
-        cards = await trySelectorAll(page, SELECTORS.candidateCards, { timeout: 5000 });
-        if (cards.length <= prevCount) {
-          console.log('[run] No more candidates to load');
+        await page.waitForTimeout(1000);
+
+        const nextBtn = await getNextPageButton();
+        if (nextBtn) {
+          currentPage++;
+          console.log(`[run] Clicking to page ${currentPage}...`);
+          await nextBtn.click();
+          await page.waitForTimeout(3000);
+
+          // Scroll back to top of new page
+          await page.evaluate(() => window.scrollTo(0, 0));
+          await page.waitForTimeout(1000);
+
+          // Load all cards on new page
+          cards = await scrollToLoadAllCards();
+          cardIndex = 0;
+          const newPageInfo = await getCurrentPageInfo();
+          console.log(`[run] Page ${currentPage}: ${cards.length} candidates loaded (${newPageInfo})`);
+          broadcast('page_changed', { page: currentPage, candidates: cards.length });
+
+          if (cards.length === 0) {
+            console.log('[run] No candidates on new page — stopping');
+            break;
+          }
+          continue;
+        } else {
+          console.log('[run] No next page button found — all pages processed');
           break;
         }
-        console.log(`[run] Scrolled: now ${cards.length} candidates`);
-        // cardIndex stays the same — continue from where we left off
-        continue;
       }
 
       const card = cards[cardIndex];
