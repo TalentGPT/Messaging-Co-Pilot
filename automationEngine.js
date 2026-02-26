@@ -623,36 +623,98 @@ async function openMessageCompose(card) {
     } catch {}
   }
 
-  // Strategy 2: Look for any clickable element near the Archive button area
+  // Strategy 2: Inspect ALL elements in the card to find the envelope icon
   if (!btn) {
-    console.log('[compose] Trying to find envelope icon near action buttons...');
+    console.log('[compose] Scanning all card elements for message/envelope icon...');
     try {
-      // Find all links/buttons in the card's action area
-      const actionElements = await card.$$('a, button');
-      for (const el of actionElements) {
+      // Log everything in the card for debugging
+      const allElements = await card.$$('a, button, span[role="button"], div[role="button"]');
+      console.log(`[compose] Found ${allElements.length} clickable elements in card`);
+      
+      for (let i = 0; i < allElements.length; i++) {
+        const el = allElements[i];
         const ariaLabel = await el.getAttribute('aria-label') || '';
         const title = await el.getAttribute('title') || '';
         const className = await el.getAttribute('class') || '';
-        if (ariaLabel.toLowerCase().includes('message') || 
-            ariaLabel.toLowerCase().includes('inmail') || 
-            ariaLabel.toLowerCase().includes('mail') ||
-            title.toLowerCase().includes('message') ||
-            title.toLowerCase().includes('inmail') ||
-            className.includes('message') ||
-            className.includes('mail')) {
-          console.log(`[compose] Found action element: aria="${ariaLabel}" title="${title}" class="${className}"`);
+        const tag = await el.evaluate(e => e.tagName.toLowerCase());
+        const href = await el.getAttribute('href') || '';
+        const dataControl = await el.getAttribute('data-control-name') || '';
+        const text = await el.innerText().catch(() => '');
+        
+        console.log(`[compose]   [${i}] <${tag}> aria="${ariaLabel}" title="${title}" class="${className.substring(0,80)}" href="${href.substring(0,60)}" data-control="${dataControl}" text="${text.substring(0,30)}"`);
+        
+        // Match: message, inmail, mail, envelope, compose, send
+        const searchText = `${ariaLabel} ${title} ${className} ${dataControl} ${href}`.toLowerCase();
+        if (searchText.includes('message') || 
+            searchText.includes('inmail') || 
+            searchText.includes('mail') ||
+            searchText.includes('compose') ||
+            searchText.includes('send-inmail') ||
+            searchText.includes('inmails')) {
+          console.log(`[compose] ✓ Found message element at index ${i}`);
           btn = el;
           break;
         }
       }
+
+      // If still no match, look for the icon AFTER the Archive button by position
+      if (!btn) {
+        console.log('[compose] Trying positional detection: icon after Archive button...');
+        const archiveBtn = await card.$('button:has-text("Archive"), a:has-text("Archive"), [aria-label*="Archive"]');
+        if (archiveBtn) {
+          // Get the next sibling elements after Archive
+          const sibling = await archiveBtn.evaluate(el => {
+            let next = el.nextElementSibling;
+            const siblings = [];
+            while (next) {
+              siblings.push({
+                tag: next.tagName.toLowerCase(),
+                class: next.className.toString().substring(0, 80),
+                aria: next.getAttribute('aria-label') || '',
+                title: next.getAttribute('title') || '',
+              });
+              next = next.nextElementSibling;
+            }
+            return siblings;
+          });
+          console.log(`[compose] Elements after Archive: ${JSON.stringify(sibling)}`);
+          
+          // Click the first link/button after Archive (should be the envelope)
+          const nextEl = await archiveBtn.evaluate(el => {
+            let next = el.nextElementSibling;
+            while (next) {
+              if (next.tagName === 'A' || next.tagName === 'BUTTON') return true;
+              next = next.nextElementSibling;
+            }
+            return false;
+          });
+          if (nextEl) {
+            btn = await card.evaluateHandle(el => {
+              const archive = el.querySelector('button[class*="archive"], a[class*="archive"], [aria-label*="Archive"]') ||
+                             Array.from(el.querySelectorAll('button, a')).find(e => e.textContent.includes('Archive'));
+              if (archive) {
+                let next = archive.nextElementSibling;
+                while (next) {
+                  if (next.tagName === 'A' || next.tagName === 'BUTTON') return next;
+                  next = next.nextElementSibling;
+                }
+              }
+              return null;
+            });
+            if (btn) {
+              console.log('[compose] ✓ Found element after Archive button (likely envelope icon)');
+            }
+          }
+        }
+      }
     } catch (err) {
-      console.log(`[compose] Action scan failed: ${err.message}`);
+      console.log(`[compose] Element scan failed: ${err.message}`);
     }
   }
 
   // Strategy 3: Click candidate name to open profile, then find message button
   if (!btn) {
-    console.log('[compose] No message icon on card, clicking candidate to open profile...');
+    console.log('[compose] No message icon found on card, clicking candidate to open profile...');
     try {
       const nameLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
       if (nameLink) {
