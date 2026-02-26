@@ -76,6 +76,7 @@ Never sound like a recruiter
 Write like an operator speaking to another operator.
 INPUTS
 My Name: Joe
+IMPORTANT: Do NOT include a sign-off, closing, or name at the end of the message. No "Best, Joe", no "Joe", no "Best," — end the message after the CTA or final sentence. LinkedIn InMail already shows the sender's name.
 Candidate Market/City:
 → Infer ONLY if explicitly listed in profile.
 Candidate LinkedIn Profile Text:
@@ -198,7 +199,8 @@ Now, generate a personalized LinkedIn sales outreach message using the following
 
 [INSERT PROFILE DATA HERE]
 
-Return only the message — no explanations, no formatting.`;
+Return only the message — no explanations, no formatting.
+IMPORTANT: Do NOT include a sign-off, closing, or name at the end. No "Best, Joe", no "Joe", no "Best," — end after the final sentence. LinkedIn already shows the sender's name.`;
 
 function formatUserPrompt(profile) {
   const sections = [`Name: ${profile.full_name || profile.name}`];
