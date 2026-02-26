@@ -1,12 +1,23 @@
-require('dotenv').config();
+try {
+  require('dotenv').config();
+} catch (e) {
+  console.error('Failed to load dotenv:', e.message);
+}
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const http = require('http');
 const { WebSocketServer } = require('ws');
+
+console.log('Loading modules...');
 const store = require('./store');
+console.log('  store OK');
 const engine = require('./automationEngine');
+console.log('  engine OK');
 const { startTunnel } = require('./tunnel');
+console.log('  tunnel OK');
+console.log('All modules loaded.');
 
 const PORT = parseInt(process.env.PORT) || 3847;
 const API_KEY = process.env.BRIDGE_API_KEY || '';
