@@ -241,6 +241,106 @@ async function clickUncontactedFilter() {
   return false;
 }
 
+async function inspectDOM() {
+  // Auto-detect the right candidate card selector by examining the actual DOM
+  console.log('[inspect] Analyzing page DOM to find candidate card selectors...');
+
+  const results = await page.evaluate(() => {
+    const report = {};
+
+    // Test various selectors and count matches
+    const testSelectors = [
+      'div.row__top-card',
+      '[class*="row__top-card"]',
+      '[class*="pipeline"] [class*="card"]',
+      '.hire-pipeline-card',
+      '.artdeco-list__item',
+      '[data-test-row]',
+      'li[class*="candidate"]',
+      // Broader selectors
+      '[class*="hiring-pipeline"] li',
+      '[class*="manage-pipeline"] li',
+      '[class*="candidate-row"]',
+      '[class*="hire-pipeline"] [class*="row"]',
+      // Profile link based - find parent containers of profile links
+      'a[href*="/talent/profile/"]',
+    ];
+
+    for (const sel of testSelectors) {
+      try {
+        const els = document.querySelectorAll(sel);
+        report[sel] = els.length;
+      } catch (e) {
+        report[sel] = `error: ${e.message}`;
+      }
+    }
+
+    // Find parent elements of profile links (these ARE the candidate cards)
+    const profileLinks = document.querySelectorAll('a[href*="/talent/profile/"]');
+    report['_profileLinkCount'] = profileLinks.length;
+
+    if (profileLinks.length > 0) {
+      // Examine the parent chain of the first profile link to find the card container
+      const link = profileLinks[0];
+      const parentChain = [];
+      let el = link.parentElement;
+      for (let i = 0; i < 8 && el; i++) {
+        const tag = el.tagName.toLowerCase();
+        const cls = el.className ? el.className.toString().substring(0, 120) : '';
+        parentChain.push(`${tag}.${cls}`);
+        el = el.parentElement;
+      }
+      report['_firstProfileLink_parentChain'] = parentChain;
+
+      // Try to find common ancestor class for all profile links
+      if (profileLinks.length >= 2) {
+        const parent1 = profileLinks[0].closest('li, [class*="row"], [class*="card"], [class*="item"]');
+        const parent2 = profileLinks[1].closest('li, [class*="row"], [class*="card"], [class*="item"]');
+        if (parent1) report['_card1_tag_class'] = `${parent1.tagName}.${parent1.className.toString().substring(0, 120)}`;
+        if (parent2) report['_card2_tag_class'] = `${parent2.tagName}.${parent2.className.toString().substring(0, 120)}`;
+
+        // Find the most specific common selector
+        if (parent1 && parent1.className) {
+          const classes = parent1.className.toString().split(/\s+/).filter(c => c.length > 3);
+          for (const cls of classes) {
+            const count = document.querySelectorAll(`.${cls}`).length;
+            if (count >= profileLinks.length) {
+              report[`_potentialSelector_.${cls}`] = count;
+            }
+          }
+        }
+      }
+    }
+
+    // Also check what the scroll container might be
+    const scrollContainers = [];
+    document.querySelectorAll('main, [role="main"], [class*="pipeline"], [class*="scaffold"], [class*="manage"]').forEach(el => {
+      if (el.scrollHeight > el.clientHeight + 100) {
+        scrollContainers.push({
+          tag: el.tagName,
+          class: el.className.toString().substring(0, 100),
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+        });
+      }
+    });
+    report['_scrollableContainers'] = scrollContainers;
+
+    return report;
+  });
+
+  console.log('[inspect] DOM analysis results:');
+  for (const [key, val] of Object.entries(results)) {
+    if (key.startsWith('_')) {
+      console.log(`[inspect]   ${key}: ${JSON.stringify(val)}`);
+    } else {
+      console.log(`[inspect]   "${key}" → ${val} matches`);
+    }
+  }
+
+  return results;
+}
+
 async function scrollToLoadAllCards() {
   // LinkedIn Recruiter lazy-loads candidate cards as you scroll.
   // We scroll slowly and incrementally to give the page time to render.
@@ -687,6 +787,11 @@ async function runOutreach(options = {}) {
     // Click Uncontacted filter
     await clickUncontactedFilter();
     await takeScreenshot('uncontacted-filter');
+
+    // Inspect DOM to find the right selectors
+    await page.waitForTimeout(3000); // Let page fully load
+    const domInfo = await inspectDOM();
+    await takeScreenshot('after-inspect');
 
     // Get candidate cards on first page (with scrolling to load all)
     let cards = await getCandidateCards();
