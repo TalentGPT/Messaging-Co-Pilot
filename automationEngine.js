@@ -732,17 +732,93 @@ async function openMessageCompose(card) {
     }
   }
 
-  // Strategy 3: Click candidate name to open profile, then find message button
+  // Strategy 3: Click candidate name to open profile panel, then find envelope in the panel
   if (!btn) {
-    console.log('[compose] No message icon found on card, clicking candidate to open profile...');
+    console.log('[compose] No message icon in card DOM. Opening candidate profile panel...');
     try {
       const nameLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
       if (nameLink) {
         await nameLink.click({ force: true });
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(4000);
+        await takeScreenshot('profile-panel-opened');
+        
+        // Now search the ENTIRE PAGE for the envelope/message icon
+        // In the profile panel, the action bar has: Change stage | Archive | ✉️ | ↗️ | ⋯
+        console.log('[compose] Searching page for message icon in profile panel...');
+        
+        // First, let's log what's near the Archive button on the page
+        const pageActionElements = await page.$$('button, a');
+        let archiveFound = false;
+        let archiveIndex = -1;
+        
+        for (let i = 0; i < pageActionElements.length; i++) {
+          const el = pageActionElements[i];
+          const text = await el.innerText().catch(() => '');
+          const aria = await el.getAttribute('aria-label') || '';
+          if (text.includes('Archive') || aria.includes('Archive')) {
+            archiveIndex = i;
+            archiveFound = true;
+            console.log(`[compose] Found Archive button at page element index ${i}`);
+            
+            // Log the next 5 elements after Archive (one of them should be the envelope)
+            for (let j = i + 1; j < Math.min(i + 6, pageActionElements.length); j++) {
+              const nextEl = pageActionElements[j];
+              const nextAria = await nextEl.getAttribute('aria-label') || '';
+              const nextTitle = await nextEl.getAttribute('title') || '';
+              const nextClass = await nextEl.getAttribute('class') || '';
+              const nextText = await nextEl.innerText().catch(() => '');
+              const nextTag = await nextEl.evaluate(e => e.tagName.toLowerCase());
+              const nextHref = await nextEl.getAttribute('href') || '';
+              console.log(`[compose]   Archive+${j-i}: <${nextTag}> aria="${nextAria}" title="${nextTitle}" text="${nextText.substring(0,20)}" class="${nextClass.substring(0,60)}" href="${nextHref.substring(0,40)}"`);
+            }
+            break;
+          }
+        }
+        
+        if (archiveFound && archiveIndex >= 0) {
+          // The envelope icon should be the next clickable element after Archive
+          // Try clicking Archive+1 (first element after Archive)
+          const envelopeCandidate = pageActionElements[archiveIndex + 1];
+          if (envelopeCandidate) {
+            const isVisible = await envelopeCandidate.isVisible().catch(() => false);
+            if (isVisible) {
+              console.log('[compose] ✓ Clicking element immediately after Archive (envelope icon)');
+              btn = envelopeCandidate;
+            }
+          }
+        }
+        
+        // Also try direct selectors on the page for common message button patterns
+        if (!btn) {
+          const panelMessageSelectors = [
+            'a[aria-label*="Send InMail"]',
+            'a[aria-label*="Send message"]',
+            'a[aria-label*="Message"]',
+            'button[aria-label*="Send InMail"]',
+            'button[aria-label*="Send message"]', 
+            'button[aria-label*="Message"]',
+            '[data-control-name*="message"]',
+            '[data-control-name*="inmail"]',
+            'a[href*="inmails"]',
+            'a[href*="message"]',
+          ];
+          for (const sel of panelMessageSelectors) {
+            try {
+              const el = await page.$(sel);
+              if (el) {
+                const isVis = await el.isVisible().catch(() => false);
+                if (isVis) {
+                  console.log(`[compose] ✓ Found via page selector: ${sel}`);
+                  btn = el;
+                  break;
+                }
+              }
+            } catch {}
+          }
+        }
       }
     } catch (err) {
-      console.log(`[compose] Name click failed: ${err.message}`);
+      console.log(`[compose] Profile panel approach failed: ${err.message}`);
     }
 
     btn = await trySelector(page, SELECTORS.messageButton, { timeout: 8000 });
