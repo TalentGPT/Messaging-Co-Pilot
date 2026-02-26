@@ -775,32 +775,46 @@ async function openMessageCompose(card) {
           }
         }
         
-        if (archiveFound && archiveIndex >= 0) {
-          // The envelope icon should be the next clickable element after Archive
-          // Try clicking Archive+1 (first element after Archive)
+        // Direct approach: find the button whose text starts with "Message"
+        // This is the envelope icon — its text is "Message [CandidateName]"
+        if (!btn) {
+          console.log('[compose] Looking for "Message" button by text...');
+          const allBtns = await page.$$('button');
+          for (const b of allBtns) {
+            const text = await b.innerText().catch(() => '');
+            if (text.startsWith('Message ')) {
+              const isVis = await b.isVisible().catch(() => false);
+              if (isVis) {
+                console.log(`[compose] ✓ Found "Message" button: "${text.substring(0, 40)}"`);
+                btn = b;
+                break;
+              }
+            }
+          }
+        }
+
+        // Fallback: use Archive+1 positioning
+        if (!btn && archiveFound && archiveIndex >= 0) {
           const envelopeCandidate = pageActionElements[archiveIndex + 1];
           if (envelopeCandidate) {
             const isVisible = await envelopeCandidate.isVisible().catch(() => false);
             if (isVisible) {
-              console.log('[compose] ✓ Clicking element immediately after Archive (envelope icon)');
+              console.log('[compose] ✓ Using Archive+1 element as envelope icon');
               btn = envelopeCandidate;
             }
           }
         }
         
-        // Also try direct selectors on the page for common message button patterns
+        // Fallback: try direct page selectors
         if (!btn) {
           const panelMessageSelectors = [
             'a[aria-label*="Send InMail"]',
-            'a[aria-label*="Send message"]',
-            'a[aria-label*="Message"]',
             'button[aria-label*="Send InMail"]',
-            'button[aria-label*="Send message"]', 
+            'a[aria-label*="Message"]',
             'button[aria-label*="Message"]',
             '[data-control-name*="message"]',
             '[data-control-name*="inmail"]',
             'a[href*="inmails"]',
-            'a[href*="message"]',
           ];
           for (const sel of panelMessageSelectors) {
             try {
@@ -830,15 +844,57 @@ async function openMessageCompose(card) {
     throw new Error('Could not find Message/InMail button');
   }
 
-  await btn.click({ force: true });
-  await page.waitForTimeout(2000);
+  // Try multiple click strategies
+  console.log('[compose] Clicking message button...');
+  try {
+    // Strategy A: force click
+    await btn.click({ force: true });
+    console.log('[compose] Click strategy A (force) executed');
+  } catch (err) {
+    console.log(`[compose] Force click failed: ${err.message}`);
+    try {
+      // Strategy B: scroll into view and regular click
+      await btn.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(500);
+      await btn.click();
+      console.log('[compose] Click strategy B (scroll+click) executed');
+    } catch (err2) {
+      console.log(`[compose] Scroll+click failed: ${err2.message}`);
+      try {
+        // Strategy C: JavaScript click
+        await btn.evaluate(el => el.click());
+        console.log('[compose] Click strategy C (JS click) executed');
+      } catch (err3) {
+        console.log(`[compose] JS click failed: ${err3.message}`);
+      }
+    }
+  }
+  
+  await page.waitForTimeout(3000);
+  await takeScreenshot('after-message-click');
   
   // Verify a compose dialog opened (look for subject or body input)
-  const composeOpen = await trySelector(page, SELECTORS.subjectInput, { timeout: 5000 }) ||
-                      await trySelector(page, SELECTORS.messageBody, { timeout: 3000 });
+  const composeOpen = await trySelector(page, SELECTORS.subjectInput, { timeout: 8000 }) ||
+                      await trySelector(page, SELECTORS.messageBody, { timeout: 5000 });
   if (!composeOpen) {
     console.log('[compose] Compose dialog may not have opened, taking screenshot...');
     await takeScreenshot('compose-not-open');
+    
+    // Last resort: try clicking "Messages" tab in profile panel
+    console.log('[compose] Trying Messages tab in profile panel...');
+    try {
+      const messagesTab = await page.$('a:has-text("Messages"), button:has-text("Messages")');
+      if (messagesTab) {
+        await messagesTab.click({ force: true });
+        await page.waitForTimeout(3000);
+        console.log('[compose] Clicked Messages tab');
+        await takeScreenshot('messages-tab-clicked');
+      }
+    } catch (e) {
+      console.log(`[compose] Messages tab click failed: ${e.message}`);
+    }
+  } else {
+    console.log('[compose] ✓ Compose dialog detected');
   }
   
   return true;
