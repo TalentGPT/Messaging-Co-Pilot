@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LinkedIn Recruiter Automation</title>
+<style>
+  :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #94a3b8; --accent: #3b82f6; --green: #22c55e; --red: #ef4444; --yellow: #eab308; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 24px; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin-bottom: 16px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  input, select { width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; margin-bottom: 12px; }
+  .row { display: flex; gap: 16px; }
+  .row > * { flex: 1; }
+  .slider-row { display: flex; gap: 16px; margin-bottom: 12px; }
+  .slider-row > div { flex: 1; }
+  .slider-row input[type=range] { width: 100%; margin-top: 4px; }
+  .slider-val { font-size: 13px; color: var(--accent); }
+  button { padding: 12px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; width: 100%; }
+  .btn-stop { background: var(--red); color: #fff; width: 100%; }
+  .btn-sm { padding: 6px 14px; font-size: 12px; border-radius: 6px; width: auto; }
+  .btn-green { background: var(--green); color: #fff; }
+  .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .status-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .badge { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .badge-green { background: rgba(34,197,94,.15); color: var(--green); }
+  .badge-red { background: rgba(239,68,68,.15); color: var(--red); }
+  .badge-yellow { background: rgba(234,179,8,.15); color: var(--yellow); }
+  .badge-blue { background: rgba(59,130,246,.15); color: var(--accent); }
+  .badge-gray { background: rgba(148,163,184,.15); color: var(--muted); }
+  .stats { display: flex; gap: 16px; margin: 12px 0; }
+  .stat { text-align: center; }
+  .stat .num { font-size: 28px; font-weight: 700; }
+  .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+  .log { max-height: 300px; overflow-y: auto; font-family: 'SF Mono', monospace; font-size: 12px; line-height: 1.6; padding: 12px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border); }
+  .log-entry { padding: 2px 0; }
+  .log-entry .time { color: var(--muted); }
+  .log-entry.error { color: var(--red); }
+  .log-entry.success { color: var(--green); }
+  .log-entry.info { color: var(--accent); }
+  .candidate-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+  .candidate-card .name { font-weight: 600; }
+  .candidate-card .headline { font-size: 13px; color: var(--muted); }
+  .candidate-card .msg-preview { font-size: 13px; margin: 8px 0; white-space: pre-wrap; max-height: 120px; overflow-y: auto; background: var(--card); padding: 8px; border-radius: 6px; }
+  .candidate-card .actions { display: flex; gap: 8px; margin-top: 8px; }
+  .hidden { display: none; }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .conn-dot.on { background: var(--green); }
+  .conn-dot.off { background: var(--red); }
+  .error-banner { background: rgba(239,68,68,.12); border: 1px solid var(--red); color: var(--red); padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>⚡ LinkedIn Recruiter Automation</h1>
+  <p class="subtitle">Messaging Co-Pilot &middot; Local Runner</p>
+
+  <div id="error-banner" class="error-banner hidden"></div>
+
+  <!-- Status -->
+  <div class="card">
+    <div class="status-bar">
+      <span>Status:</span>
+      <span id="run-badge" class="badge badge-gray">Idle</span>
+      <span><span id="ws-dot" class="conn-dot off"></span> <span id="ws-label" style="font-size:12px;color:var(--muted)">Disconnected</span></span>
+      <span id="browser-badge" class="badge badge-gray" style="margin-left:auto">Browser: ?</span>
+    </div>
+    <div class="stats" id="stats">
+      <div class="stat"><div class="num" id="s-processed">0</div><div class="label">Processed</div></div>
+      <div class="stat"><div class="num" id="s-succeeded" style="color:var(--green)">0</div><div class="label">Succeeded</div></div>
+      <div class="stat"><div class="num" id="s-failed" style="color:var(--red)">0</div><div class="label">Failed</div></div>
+      <div class="stat"><div class="num" id="s-pending" style="color:var(--yellow)">0</div><div class="label">Pending</div></div>
+    </div>
+  </div>
+
+  <!-- Config -->
+  <div class="card">
+    <h2>Configuration</h2>
+    <label>LinkedIn Recruiter Project URL</label>
+    <input id="project-url" value="https://www.linkedin.com/talent/hire/1419489929/manage/12968975718">
+    <div class="row">
+      <div>
+        <label>Max Candidates</label>
+        <input id="max-candidates" type="number" value="2" min="1" max="100">
+      </div>
+      <div>
+        <label>Run Mode</label>
+        <select id="run-mode">
+          <option value="dry_run" selected>Dry Run</option>
+          <option value="manual_review">Manual Review</option>
+          <option value="auto_send">Auto Send</option>
+        </select>
+      </div>
+    </div>
+    <label>Rate Limit (seconds between candidates)</label>
+    <div class="slider-row">
+      <div>
+        <label>Min: <span class="slider-val" id="rate-min-val">10</span>s</label>
+        <input type="range" id="rate-min" min="5" max="120" value="10">
+      </div>
+      <div>
+        <label>Max: <span class="slider-val" id="rate-max-val">60</span>s</label>
+        <input type="range" id="rate-max" min="10" max="180" value="60">
+      </div>
+    </div>
+    <button id="btn-start" class="btn-primary" onclick="startRun()">▶ Start Run</button>
+    <button id="btn-stop" class="btn-stop hidden" onclick="stopRun()">⏹ Stop Run</button>
+  </div>
+
+  <!-- Pending Review -->
+  <div class="card hidden" id="pending-section">
+    <h2>📋 Pending Review</h2>
+    <div id="pending-list"></div>
+  </div>
+
+  <!-- Candidates -->
+  <div class="card" id="candidates-section">
+    <h2>Candidates</h2>
+    <div id="candidates-list"><p style="color:var(--muted);font-size:13px">No candidates yet. Start a run above.</p></div>
+  </div>
+
+  <!-- Log -->
+  <div class="card">
+    <h2>📜 Activity Log</h2>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+const API_KEY = '';  // Set if you have one; empty = no auth for localhost
+const BASE = '';     // Same origin
+
+// Sliders
+document.getElementById('rate-min').oninput = e => document.getElementById('rate-min-val').textContent = e.target.value;
+document.getElementById('rate-max').oninput = e => document.getElementById('rate-max-val').textContent = e.target.value;
+
+// State
+let candidates = {};
+let ws = null;
+let running = false;
+
+function headers() {
+  const h = { 'Content-Type': 'application/json' };
+  if (API_KEY) h['x-api-key'] = API_KEY;
+  return h;
+}
+
+function log(msg, cls = '') {
+  const el = document.getElementById('log');
+  const t = new Date().toLocaleTimeString();
+  el.innerHTML += `<div class="log-entry ${cls}"><span class="time">${t}</span> ${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function updateStats(data) {
+  if (!data) return;
+  document.getElementById('s-processed').textContent = data.processed || 0;
+  document.getElementById('s-succeeded').textContent = data.succeeded || 0;
+  document.getElementById('s-failed').textContent = data.failed || 0;
+}
+
+function setRunning(r) {
+  running = r;
+  document.getElementById('btn-start').classList.toggle('hidden', r);
+  document.getElementById('btn-stop').classList.toggle('hidden', !r);
+  const badge = document.getElementById('run-badge');
+  if (r) { badge.textContent = 'Running'; badge.className = 'badge badge-green'; }
+  else { badge.textContent = 'Idle'; badge.className = 'badge badge-gray'; }
+}
+
+function setBrowser(connected) {
+  const b = document.getElementById('browser-badge');
+  b.textContent = connected ? 'Browser: Connected' : 'Browser: Not connected';
+  b.className = connected ? 'badge badge-green' : 'badge badge-red';
+}
+
+function renderCandidate(c) {
+  const statusBadge = {
+    dry_run: '<span class="badge badge-blue">Dry Run</span>',
+    pending_review: '<span class="badge badge-yellow">Pending</span>',
+    sent: '<span class="badge badge-green">Sent</span>',
+    error: '<span class="badge badge-red">Error</span>',
+    skipped: '<span class="badge badge-gray">Skipped</span>',
+  }[c.status] || `<span class="badge badge-gray">${c.status}</span>`;
+
+  const actions = c.status === 'pending_review' ? `
+    <div class="actions">
+      <button class="btn-sm btn-green" onclick="approve('${c.id}')">✓ Approve</button>
+      <button class="btn-sm btn-outline" onclick="skip('${c.id}')">Skip</button>
+    </div>` : '';
+
+  const msg = c.tuned_message || c.message || '';
+  const msgPreview = msg ? `<div class="msg-preview">${escHtml(msg)}</div>` : '';
+  const subj = c.subject ? `<div style="font-size:12px;color:var(--accent)">Subject: ${escHtml(c.subject)}</div>` : '';
+  const err = c.error ? `<div style="font-size:12px;color:var(--red);margin-top:4px">Error: ${escHtml(c.error)}</div>` : '';
+
+  return `<div class="candidate-card" id="cand-${c.id}">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div><span class="name">${escHtml(c.name)}</span> ${statusBadge}</div>
+    </div>
+    <div class="headline">${escHtml(c.headline || '')}</div>
+    ${subj}${msgPreview}${err}${actions}
+  </div>`;
+}
+
+function refreshCandidates() {
+  const list = document.getElementById('candidates-list');
+  const all = Object.values(candidates);
+  if (all.length === 0) {
+    list.innerHTML = '<p style="color:var(--muted);font-size:13px">No candidates yet.</p>';
+    return;
+  }
+  list.innerHTML = all.map(renderCandidate).join('');
+  
+  // Pending section
+  const pending = all.filter(c => c.status === 'pending_review');
+  const ps = document.getElementById('pending-section');
+  const pl = document.getElementById('pending-list');
+  if (pending.length > 0) {
+    ps.classList.remove('hidden');
+    pl.innerHTML = pending.map(renderCandidate).join('');
+    document.getElementById('s-pending').textContent = pending.length;
+  } else {
+    ps.classList.add('hidden');
+    document.getElementById('s-pending').textContent = 0;
+  }
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// API calls
+async function startRun() {
+  try {
+    const body = {
+      project_url: document.getElementById('project-url').value,
+      run_mode: document.getElementById('run-mode').value,
+      max_candidates: parseInt(document.getElementById('max-candidates').value),
+      rate_limit_min: parseInt(document.getElementById('rate-min').value),
+      rate_limit_max: parseInt(document.getElementById('rate-max').value),
+    };
+    const resp = await fetch('/api/run', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    const data = await resp.json();
+    if (data.error) { log('Error: ' + data.error, 'error'); return; }
+    log('Run started: ' + data.run_mode, 'info');
+    setRunning(true);
+    candidates = {};
+    refreshCandidates();
+  } catch (e) { log('Failed to start: ' + e.message, 'error'); }
+}
+
+async function stopRun() {
+  try {
+    await fetch('/api/stop', { method: 'POST', headers: headers() });
+    log('Stop requested', 'info');
+  } catch (e) { log('Failed to stop: ' + e.message, 'error'); }
+}
+
+async function approve(id) {
+  try {
+    const resp = await fetch(`/api/approve/${id}`, { method: 'POST', headers: headers() });
+    const data = await resp.json();
+    if (data.error) log('Approve error: ' + data.error, 'error');
+    else log('Approved: ' + id, 'success');
+  } catch (e) { log('Approve failed: ' + e.message, 'error'); }
+}
+
+async function skip(id) {
+  try {
+    await fetch(`/api/skip/${id}`, { method: 'POST', headers: headers() });
+    log('Skipped: ' + id, 'info');
+    if (candidates[id]) { candidates[id].status = 'skipped'; refreshCandidates(); }
+  } catch (e) { log('Skip failed: ' + e.message, 'error'); }
+}
+
+// Poll status
+async function pollStatus() {
+  try {
+    const resp = await fetch('/api/status', { headers: headers() });
+    const data = await resp.json();
+    setRunning(data.running);
+    setBrowser(data.browserConnected);
+    if (data.currentRun) updateStats(data.currentRun);
+  } catch {}
+}
+
+// WebSocket
+function connectWs() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${location.host}/ws` + (API_KEY ? `?api_key=${API_KEY}` : '');
+  ws = new WebSocket(url);
+  
+  ws.onopen = () => {
+    document.getElementById('ws-dot').className = 'conn-dot on';
+    document.getElementById('ws-label').textContent = 'Connected';
+    log('WebSocket connected', 'success');
+  };
+  
+  ws.onclose = () => {
+    document.getElementById('ws-dot').className = 'conn-dot off';
+    document.getElementById('ws-label').textContent = 'Disconnected';
+    setTimeout(connectWs, 3000);
+  };
+  
+  ws.onerror = () => {};
+  
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      handleEvent(msg);
+    } catch {}
+  };
+}
+
+function handleEvent(msg) {
+  switch (msg.event) {
+    case 'run_started':
+      setRunning(true); log(`Run started (${msg.runMode})`, 'info'); break;
+    case 'run_completed':
+    case 'run_stopped':
+      setRunning(false);
+      log(`Run ${msg.status || msg.event}: ${msg.processed || 0} processed, ${msg.succeeded || 0} succeeded, ${msg.failed || 0} failed`, msg.failed > 0 ? 'error' : 'success');
+      updateStats(msg); break;
+    case 'run_error':
+      setRunning(false); log('Run error: ' + msg.error, 'error'); break;
+    case 'login_required':
+      log('⚠️ Login required — check the browser window', 'error'); break;
+    case 'login_success':
+      log('✓ Logged in', 'success'); break;
+    case 'candidates_found':
+      log(`Found ${msg.total} candidates, processing ${msg.processing}`, 'info'); break;
+    case 'processing_candidate':
+      log(`Processing ${msg.index}/${msg.total}: ${msg.name}`, 'info'); break;
+    case 'generating_message':
+      log(`Generating message for ${msg.candidate}...`, 'info'); break;
+    case 'message_generated':
+      if (msg.candidateId) {
+        candidates[msg.candidateId] = { ...(candidates[msg.candidateId] || {}), id: msg.candidateId, name: msg.name, subject: msg.subject, tuned_message: msg.message, message: msg.original, status: 'processing' };
+        refreshCandidates();
+      }
+      log(`Message generated for ${msg.name}`, 'success'); break;
+    case 'message_sent':
+      if (msg.candidateId && candidates[msg.candidateId]) { candidates[msg.candidateId].status = 'sent'; refreshCandidates(); }
+      log(`✓ Message sent to ${msg.name}`, 'success'); break;
+    case 'pending_review':
+      if (msg.candidateId) {
+        candidates[msg.candidateId] = { ...(candidates[msg.candidateId] || {}), id: msg.candidateId, name: msg.name, status: 'pending_review' };
+        refreshCandidates();
+      }
+      log(`⏳ ${msg.name} queued for review`, 'info'); break;
+    case 'candidate_error':
+      log(`✗ Error on candidate ${msg.index}: ${msg.error}`, 'error'); break;
+    case 'candidate_skipped':
+      if (msg.candidateId && candidates[msg.candidateId]) { candidates[msg.candidateId].status = 'skipped'; refreshCandidates(); }
+      break;
+    case 'waiting':
+      log(`Rate limit: waiting ${msg.seconds}s...`, ''); break;
+    case 'stop_requested':
+      log('Stop requested...', 'info'); break;
+    case 'status':
+      log(msg.message || '', 'info'); break;
+    default:
+      if (msg.event !== 'connected') log(JSON.stringify(msg), '');
+  }
+}
+
+// Init
+pollStatus();
+setInterval(pollStatus, 5000);
+connectWs();
+</script>
+</body>
+</html>
