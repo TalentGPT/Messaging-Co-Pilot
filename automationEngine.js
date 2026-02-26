@@ -243,10 +243,15 @@ async function clickUncontactedFilter() {
 
 async function scrollToLoadAllCards() {
   // LinkedIn Recruiter lazy-loads candidate cards as you scroll.
-  // We need to find the right scrollable container and scroll it repeatedly.
-  const MAX_SCROLL_ATTEMPTS = 30;
+  // We scroll slowly and incrementally to give the page time to render.
+  const MAX_SCROLL_ATTEMPTS = 40;
+  const SCROLL_PAUSE_MS = 3000; // 3 seconds between scrolls
+  const STABLE_THRESHOLD = 4;   // need 4 stable rounds before stopping
   let previousCount = 0;
   let stableRounds = 0;
+
+  // Initial wait for page to settle
+  await page.waitForTimeout(2000);
 
   for (let attempt = 0; attempt < MAX_SCROLL_ATTEMPTS; attempt++) {
     const cards = await trySelectorAll(page, SELECTORS.candidateCards, { timeout: 10000 });
@@ -254,15 +259,23 @@ async function scrollToLoadAllCards() {
     console.log(`[scroll] Attempt ${attempt + 1}: ${currentCount} cards visible`);
 
     if (currentCount === 0 && attempt === 0) {
-      console.log('[scroll] No cards found on first attempt, taking debug screenshot');
-      await takeScreenshot('no-candidates');
-      return [];
+      console.log('[scroll] No cards found on first attempt, waiting longer...');
+      await page.waitForTimeout(5000);
+      const retry = await trySelectorAll(page, SELECTORS.candidateCards, { timeout: 10000 });
+      if (retry.length === 0) {
+        console.log('[scroll] Still no cards — taking debug screenshot');
+        await takeScreenshot('no-candidates');
+        return [];
+      }
+      previousCount = retry.length;
+      console.log(`[scroll] After extra wait: ${retry.length} cards`);
+      continue;
     }
 
     if (currentCount === previousCount) {
       stableRounds++;
-      if (stableRounds >= 3) {
-        console.log(`[scroll] Card count stable at ${currentCount} for 3 rounds — done scrolling`);
+      if (stableRounds >= STABLE_THRESHOLD) {
+        console.log(`[scroll] Card count stable at ${currentCount} for ${STABLE_THRESHOLD} rounds — done scrolling`);
         break;
       }
     } else {
@@ -270,28 +283,29 @@ async function scrollToLoadAllCards() {
     }
     previousCount = currentCount;
 
-    // Scroll multiple containers — LinkedIn Recruiter uses various scrollable wrappers
+    // Incremental scroll — move down by viewport height, not jumping to bottom
     await page.evaluate(() => {
-      // Strategy 1: Scroll the main content area / pipeline list
+      // Find all potential scrollable containers
       const containers = [
         document.querySelector('.hiring-pipeline-candidates'),
         document.querySelector('[class*="pipeline-candidates"]'),
         document.querySelector('[class*="hiring-pipeline"] [class*="list"]'),
         document.querySelector('[class*="manage-candidates"]'),
-        document.querySelector('main'),
-        document.querySelector('[role="main"]'),
         document.querySelector('.scaffold-layout__main'),
         document.querySelector('[class*="scaffold"] [class*="main"]'),
+        document.querySelector('main'),
+        document.querySelector('[role="main"]'),
       ].filter(Boolean);
 
+      // Scroll each container incrementally (by ~800px, roughly one viewport)
       for (const el of containers) {
-        el.scrollTop = el.scrollHeight;
+        el.scrollTop += 800;
       }
-      // Strategy 2: Also scroll the window itself
-      window.scrollTo(0, document.body.scrollHeight);
+      // Also scroll the window incrementally
+      window.scrollBy(0, 800);
     });
 
-    // Also try scrolling the last visible card into view
+    // Scroll last visible card into view for precision
     const lastCard = cards[cards.length - 1];
     if (lastCard) {
       try {
@@ -299,8 +313,12 @@ async function scrollToLoadAllCards() {
       } catch (e) { /* ignore */ }
     }
 
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(SCROLL_PAUSE_MS);
   }
+
+  // Final full scroll to absolute bottom + wait
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(3000);
 
   const finalCards = await trySelectorAll(page, SELECTORS.candidateCards, { timeout: 5000 });
   console.log(`[scroll] Final: ${finalCards.length} cards loaded on this page`);
