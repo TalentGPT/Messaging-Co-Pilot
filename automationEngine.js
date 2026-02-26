@@ -590,11 +590,31 @@ async function generateMessage(candidateInfo) {
 // ── InMail compose & send ──
 
 async function openMessageCompose(card) {
-  // Strategy 1: Find the message/envelope icon directly on the card row
-  // (avoids clicking the card which opens an overlay that blocks everything)
+  // The card element (row__top-card) is narrow — action buttons (envelope, Archive, etc.)
+  // are in the PARENT container (row__card). So we search the parent.
   console.log('[compose] Looking for message icon on card...');
   
-  // Try finding the message icon within the card first
+  // Get the parent card container which has the action buttons
+  const parentCard = await card.evaluateHandle(el => {
+    // Walk up to find the broader card container
+    let parent = el.parentElement;
+    for (let i = 0; i < 5 && parent; i++) {
+      if (parent.className && parent.className.toString().includes('row__card')) return parent;
+      // Also check for common list item patterns
+      if (parent.tagName === 'LI' || parent.tagName === 'TR') return parent;
+      parent = parent.parentElement;
+    }
+    // Fall back to grandparent
+    return el.parentElement || el;
+  });
+  
+  const searchScope = parentCard || card;
+  
+  // Log what we're searching in
+  const scopeClass = await searchScope.evaluate(el => el.className.toString().substring(0, 100)).catch(() => 'unknown');
+  const scopeTag = await searchScope.evaluate(el => el.tagName).catch(() => 'unknown');
+  console.log(`[compose] Search scope: <${scopeTag}> class="${scopeClass}"`);
+  
   let btn = null;
   const cardMessageSelectors = [
     'a[aria-label*="Message"]',
@@ -612,7 +632,7 @@ async function openMessageCompose(card) {
 
   for (const sel of cardMessageSelectors) {
     try {
-      const el = await card.$(sel);
+      const el = await searchScope.$(sel);
       if (el) {
         const ariaLabel = await el.getAttribute('aria-label') || '';
         const text = await el.innerText().catch(() => '');
@@ -628,7 +648,7 @@ async function openMessageCompose(card) {
     console.log('[compose] Scanning all card elements for message/envelope icon...');
     try {
       // Log everything in the card for debugging
-      const allElements = await card.$$('a, button, span[role="button"], div[role="button"]');
+      const allElements = await searchScope.$$('a, button, span[role="button"], div[role="button"]');
       console.log(`[compose] Found ${allElements.length} clickable elements in card`);
       
       for (let i = 0; i < allElements.length; i++) {
@@ -660,7 +680,7 @@ async function openMessageCompose(card) {
       // If still no match, look for the icon AFTER the Archive button by position
       if (!btn) {
         console.log('[compose] Trying positional detection: icon after Archive button...');
-        const archiveBtn = await card.$('button:has-text("Archive"), a:has-text("Archive"), [aria-label*="Archive"]');
+        const archiveBtn = await searchScope.$('button:has-text("Archive"), a:has-text("Archive"), [aria-label*="Archive"]');
         if (archiveBtn) {
           // Get the next sibling elements after Archive
           const sibling = await archiveBtn.evaluate(el => {
@@ -689,7 +709,7 @@ async function openMessageCompose(card) {
             return false;
           });
           if (nextEl) {
-            btn = await card.evaluateHandle(el => {
+            btn = await searchScope.evaluateHandle(el => {
               const archive = el.querySelector('button[class*="archive"], a[class*="archive"], [aria-label*="Archive"]') ||
                              Array.from(el.querySelectorAll('button, a')).find(e => e.textContent.includes('Archive'));
               if (archive) {
