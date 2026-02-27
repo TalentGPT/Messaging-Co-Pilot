@@ -834,7 +834,23 @@ async function fillMessageBody(message) {
 async function clickSend() {
   const btn = await trySelector(page, SELECTORS.sendButton, { timeout: 5000 });
   if (!btn) throw new Error('Could not find Send button');
-  await btn.click();
+
+  // Wait for the Send button to become enabled (LinkedIn disables it briefly after fill)
+  console.log('[compose] Waiting for Send button to become enabled...');
+  for (let i = 0; i < 20; i++) {
+    const disabled = await btn.evaluate(el => el.disabled || el.getAttribute('aria-disabled') === 'true' || el.classList.contains('artdeco-button--disabled'));
+    if (!disabled) break;
+    await page.waitForTimeout(500);
+  }
+
+  // Try JS click first (more reliable than Playwright click for LinkedIn buttons)
+  try {
+    await btn.evaluate(el => el.click());
+    console.log('[compose] ✓ Send button clicked via JS');
+  } catch (e) {
+    console.log('[compose] JS click failed, trying Playwright click...');
+    await btn.click({ timeout: 10000 });
+  }
   await page.waitForTimeout(2000);
   return true;
 }
@@ -1105,8 +1121,56 @@ async function runOutreach(options = {}) {
         store.updateRun(runId, { processed, succeeded, failed, skipped });
         broadcast('candidate_error', { index: processed, error: err.message });
 
-        // Try to close any open dialogs
-        await closeMessageDialog();
+        // Force-close everything and reset to list view
+        console.log('[recovery] Cleaning up after error...');
+        try {
+          await closeMessageDialog();
+          await page.waitForTimeout(500);
+
+          // Close any remaining modals/overlays
+          for (const closeSelector of [
+            'button[aria-label="Close"]',
+            'button[aria-label="Dismiss"]',
+            'button[data-test-modal-close-btn]',
+            '[class*="artdeco-modal__dismiss"]',
+          ]) {
+            try {
+              const closeBtn = await page.$(closeSelector);
+              if (closeBtn && await closeBtn.isVisible().catch(() => false)) {
+                await closeBtn.click();
+                await page.waitForTimeout(300);
+              }
+            } catch (_) {}
+          }
+
+          // Escape any remaining overlay
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(500);
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(500);
+
+          // Navigate back to project URL to fully reset state
+          const projectUrl = process.env.PROJECT_URL;
+          console.log('[recovery] Navigating back to candidate list...');
+          await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          await page.waitForTimeout(3000);
+
+          // Re-click Uncontacted filter
+          try {
+            const filterBtn = await page.$('button:has-text("Uncontacted")') ||
+                              await page.$('[data-test-pipeline-filter="UNCONTACTED"]');
+            if (filterBtn) {
+              await filterBtn.click();
+              await page.waitForTimeout(2000);
+            }
+          } catch (_) {}
+
+          // Re-scroll to load all candidates
+          cards = await scrollAndCollect(page);
+          console.log(`[recovery] Re-loaded ${cards.length} cards after error recovery`);
+        } catch (recoveryErr) {
+          console.error(`[recovery] Recovery failed: ${recoveryErr.message}`);
+        }
       }
     }
 
