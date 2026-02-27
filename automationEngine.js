@@ -888,6 +888,7 @@ async function runOutreach(options = {}) {
     let processed = 0, succeeded = 0, failed = 0, skipped = 0;
     let cardIndex = 0;
     let currentPage = 1;
+    const processedNames = new Set(); // track sent candidates to skip after re-navigation
 
     while (processed < maxCandidates) {
       if (stopRequested) {
@@ -940,6 +941,13 @@ async function runOutreach(options = {}) {
       try {
         // Extract candidate info
         const info = await extractCandidateInfo(card);
+
+        // Skip already-processed candidates (after re-navigation)
+        if (processedNames.has(info.name)) {
+          console.log(`[run] Skipping already-processed: ${info.name}`);
+          continue;
+        }
+
         console.log(`[run] Processing ${processed + 1}/${maxCandidates}: ${info.name}`);
         broadcast('processing_candidate', { index: processed + 1, total: maxCandidates, name: info.name });
 
@@ -968,6 +976,7 @@ async function runOutreach(options = {}) {
           console.log(`  Subject: ${tuned.subject || generated.subject}`);
           console.log(`  Message: ${tuned.message.substring(0, 100)}...`);
           store.updateCandidate(candidateId, { status: 'dry_run' });
+          processedNames.add(info.name);
           succeeded++;
         } else if (runMode === 'manual_review') {
           store.updateCandidate(candidateId, { status: 'pending_review' });
@@ -987,10 +996,54 @@ async function runOutreach(options = {}) {
           await clickSend();
           await takeScreenshot(`sent-${processed}`);
 
-          // Move to Contacted
-          await moveToCont(card);
+          // Close compose dialog / any overlays, return to list view
+          console.log('[compose] Closing dialogs and returning to list...');
+          await closeMessageDialog();
+          await page.waitForTimeout(1000);
+
+          // Close any remaining modals/overlays
+          for (const closeSelector of [
+            'button[aria-label="Close"]',
+            'button[aria-label="Dismiss"]',
+            'button[data-test-modal-close-btn]',
+            '[class*="artdeco-modal__dismiss"]',
+          ]) {
+            try {
+              const closeBtn = await page.$(closeSelector);
+              if (closeBtn && await closeBtn.isVisible().catch(() => false)) {
+                await closeBtn.click();
+                await page.waitForTimeout(500);
+              }
+            } catch (_) {}
+          }
+
+          // Press Escape to dismiss any remaining overlay
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(1000);
+
+          // Navigate back to project URL and re-load the list
+          const projectUrl = process.env.PROJECT_URL;
+          console.log('[compose] Navigating back to candidate list...');
+          await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          await page.waitForTimeout(3000);
+
+          // Re-click Uncontacted filter
+          try {
+            const filterBtn = await page.$('button:has-text("Uncontacted")') ||
+                              await page.$('[data-test-pipeline-filter="UNCONTACTED"]');
+            if (filterBtn) {
+              await filterBtn.click();
+              await page.waitForTimeout(2000);
+            }
+          } catch (_) {}
+
+          // Re-scroll to load all candidates
+          cards = await scrollToLoadAllCards();
+          cardIndex = 0; // reset — we'll skip already-processed by name
+          console.log(`[compose] Re-loaded ${cards.length} cards after navigation`);
 
           store.updateCandidate(candidateId, { status: 'sent' });
+          processedNames.add(info.name);
           broadcast('message_sent', { candidateId, name: info.name });
           console.log(`[auto_send] Sent message to ${info.name}`);
           succeeded++;
