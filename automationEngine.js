@@ -744,7 +744,8 @@ async function fillSubject(subject) {
   if (el) {
     await el.click();
     await el.fill('');
-    await el.type(subject, { delay: 30 + Math.random() * 40 });
+    await el.fill(subject);
+    console.log(`[compose] ✓ Subject filled: "${subject}"`);
     return true;
   }
   console.log('[compose] Subject input not found (may not be required)');
@@ -779,16 +780,21 @@ async function fillMessageBody(message) {
   await el.click();
   await page.waitForTimeout(500);
 
-  // Clear existing content
+  // Clear existing content and fill via clipboard-style paste (type() is too slow and times out)
   const tagName = await el.evaluate(e => e.tagName.toLowerCase());
   if (tagName === 'textarea' || tagName === 'input') {
     await el.fill('');
-    await el.type(message, { delay: 25 + Math.random() * 35 });
+    await el.fill(message);
   } else {
-    // contenteditable div
-    await el.evaluate(e => e.innerHTML = '');
-    await el.type(message, { delay: 25 + Math.random() * 35 });
+    // contenteditable div — use evaluate to set text, then dispatch input event
+    await el.evaluate((e, msg) => {
+      e.focus();
+      e.innerText = msg;
+      e.dispatchEvent(new Event('input', { bubbles: true }));
+      e.dispatchEvent(new Event('change', { bubbles: true }));
+    }, message);
   }
+  console.log(`[compose] ✓ Message body filled (${message.length} chars)`);
   return true;
 }
 
