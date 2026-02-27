@@ -601,9 +601,9 @@ async function generateMessage(candidateInfo) {
 
 // ── InMail compose & send ──
 
-async function openMessageCompose(card) {
+async function openMessageCompose(card, candidateName) {
   // STEP 1: Click candidate name to open profile panel
-  console.log('[compose] Opening candidate profile panel...');
+  console.log(`[compose] Opening profile panel for: ${candidateName}...`);
   const nameLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
   if (!nameLink) throw new Error('Could not find candidate name link');
   
@@ -632,16 +632,49 @@ async function openMessageCompose(card) {
       const btnText = await messageBtn.evaluate(el => el.textContent.trim().substring(0, 50));
       console.log(`[compose] Found Message button: "${btnText}"`);
       
-      // Click using JavaScript directly on the DOM element
-      await messageBtn.evaluate(el => {
-        el.scrollIntoView({ block: 'center' });
-      });
-      await page.waitForTimeout(500);
+      // Validate button matches expected candidate (first name check)
+      if (candidateName) {
+        const firstName = candidateName.split(' ')[0];
+        if (!btnText.includes(firstName)) {
+          console.log(`[compose] ⚠ Name mismatch! Expected "${firstName}" but button says "${btnText}". Retrying...`);
+          // Try clicking the card name link again and wait longer
+          const retryLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
+          if (retryLink) {
+            await retryLink.click({ force: true });
+            await page.waitForTimeout(5000);
+          }
+          // Re-find the button
+          const retryBtn = await page.evaluateHandle(() => {
+            const buttons = Array.from(document.querySelectorAll('button'));
+            return buttons.find(b => b.textContent.trim().startsWith('Message ') && b.offsetParent !== null) || null;
+          });
+          if (retryBtn && await retryBtn.evaluate(el => el !== null)) {
+            const retryText = await retryBtn.evaluate(el => el.textContent.trim().substring(0, 50));
+            console.log(`[compose] Retry found: "${retryText}"`);
+            if (!retryText.includes(firstName)) {
+              throw new Error(`Profile panel shows wrong candidate: "${retryText}" (expected "${firstName}")`);
+            }
+            await retryBtn.evaluate(el => { el.scrollIntoView({ block: 'center' }); });
+            await page.waitForTimeout(500);
+            await retryBtn.evaluate(el => el.click());
+            console.log('[compose] ✓ JS click on Message button executed (after retry)');
+            clicked = true;
+          }
+        }
+      }
       
-      // Try JS click first (most reliable for LinkedIn's Ember.js components)
-      await messageBtn.evaluate(el => el.click());
-      console.log('[compose] ✓ JS click on Message button executed');
-      clicked = true;
+      if (!clicked) {
+        // Click using JavaScript directly on the DOM element
+        await messageBtn.evaluate(el => {
+          el.scrollIntoView({ block: 'center' });
+        });
+        await page.waitForTimeout(500);
+        
+        // Try JS click first (most reliable for LinkedIn's Ember.js components)
+        await messageBtn.evaluate(el => el.click());
+        console.log('[compose] ✓ JS click on Message button executed');
+        clicked = true;
+      }
     }
   } catch (err) {
     console.log(`[compose] Approach 1 (JS find+click) failed: ${err.message}`);
@@ -985,7 +1018,7 @@ async function runOutreach(options = {}) {
           succeeded++;
         } else if (runMode === 'auto_send') {
           // Open compose, fill, send
-          await openMessageCompose(card);
+          await openMessageCompose(card, info.name);
           await takeScreenshot(`compose-${processed}`);
 
           const subjectToSend = tuned.subject || generated.subject;
