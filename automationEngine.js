@@ -1121,6 +1121,12 @@ async function runOutreach(options = {}) {
         store.updateRun(runId, { processed, succeeded, failed, skipped });
         broadcast('candidate_error', { index: processed, error: err.message });
 
+        // Mark failed candidate as processed so we don't retry them on every page
+        if (info && info.name) {
+          processedNames.add(info.name);
+          console.log(`[recovery] Added "${info.name}" to processed list to prevent retry`);
+        }
+
         // Force-close everything and reset to list view
         console.log('[recovery] Cleaning up after error...');
         try {
@@ -1165,11 +1171,17 @@ async function runOutreach(options = {}) {
             }
           } catch (_) {}
 
-          // Re-scroll to load all candidates
-          cards = await scrollAndCollect(page);
+          // Re-scroll to load all candidates (use getCandidateCards, not scrollAndCollect)
+          cards = await getCandidateCards();
           console.log(`[recovery] Re-loaded ${cards.length} cards after error recovery`);
+
+          // Skip to next page since this candidate is stuck
+          console.log('[recovery] Breaking out of current page to try next page...');
+          break;
         } catch (recoveryErr) {
           console.error(`[recovery] Recovery failed: ${recoveryErr.message}`);
+          // Even if recovery fails, break out of current page loop
+          break;
         }
       }
     }
