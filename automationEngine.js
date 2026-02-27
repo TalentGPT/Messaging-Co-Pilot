@@ -806,6 +806,13 @@ async function fillMessageBody(message) {
   }
   
   if (!el) {
+    // Check if we hit an InMail credits / template selection dialog (lots of checkboxes, no text body)
+    const checkboxes = await page.$$('input[type="checkbox"]');
+    if (checkboxes.length > 3) {
+      await takeScreenshot('inmail-credits-dialog');
+      console.log(`[compose] Detected non-compose dialog (${checkboxes.length} checkboxes) — likely InMail credits or template selector`);
+      throw new Error(`Non-compose dialog detected (${checkboxes.length} checkboxes, no message body) — may be out of InMail credits`);
+    }
     await takeScreenshot('no-message-body');
     throw new Error('Could not find message body field');
   }
@@ -990,6 +997,15 @@ async function runOutreach(options = {}) {
       try {
         // Extract candidate info
         const info = await extractCandidateInfo(card);
+
+        // Skip candidates with no extractable info (stale DOM, failed extraction)
+        if (info.name === 'Unknown' && !info.linkedin_url) {
+          console.log(`[run] Skipping unresolvable candidate (Unknown, no URL) at index ${cardIndex}`);
+          skipped++;
+          processed++;
+          store.updateRun(runId, { processed, succeeded, failed, skipped });
+          continue;
+        }
 
         // Skip already-processed candidates (after re-navigation)
         if (processedNames.has(info.name)) {
