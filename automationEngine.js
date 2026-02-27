@@ -590,313 +590,140 @@ async function generateMessage(candidateInfo) {
 // ── InMail compose & send ──
 
 async function openMessageCompose(card) {
-  // The card element (row__top-card) is narrow — action buttons (envelope, Archive, etc.)
-  // are in the PARENT container (row__card). So we search the parent.
-  console.log('[compose] Looking for message icon on card...');
+  // STEP 1: Click candidate name to open profile panel
+  console.log('[compose] Opening candidate profile panel...');
+  const nameLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
+  if (!nameLink) throw new Error('Could not find candidate name link');
   
-  // Get the parent card container which has the action buttons
-  const parentCard = await card.evaluateHandle(el => {
-    // Walk up to find the broader card container
-    let parent = el.parentElement;
-    for (let i = 0; i < 5 && parent; i++) {
-      if (parent.className && parent.className.toString().includes('row__card')) return parent;
-      // Also check for common list item patterns
-      if (parent.tagName === 'LI' || parent.tagName === 'TR') return parent;
-      parent = parent.parentElement;
-    }
-    // Fall back to grandparent
-    return el.parentElement || el;
-  });
-  
-  const searchScope = parentCard || card;
-  
-  // Log what we're searching in
-  const scopeClass = await searchScope.evaluate(el => el.className.toString().substring(0, 100)).catch(() => 'unknown');
-  const scopeTag = await searchScope.evaluate(el => el.tagName).catch(() => 'unknown');
-  console.log(`[compose] Search scope: <${scopeTag}> class="${scopeClass}"`);
-  
-  let btn = null;
-  const cardMessageSelectors = [
-    'a[aria-label*="Message"]',
-    'a[aria-label*="InMail"]',
-    'button[aria-label*="Message"]',
-    'button[aria-label*="InMail"]',
-    '[data-test-send-inmail]',
-    '[class*="message-icon"]',
-    '[class*="mail-icon"]',
-    'a[href*="message"]',
-    // The envelope icon next to Archive button
-    'a[class*="icon"]',
-    'button[class*="icon"]',
-  ];
+  await nameLink.click({ force: true });
+  await page.waitForTimeout(4000);
+  await takeScreenshot('profile-panel-opened');
 
-  for (const sel of cardMessageSelectors) {
-    try {
-      const el = await searchScope.$(sel);
-      if (el) {
-        const ariaLabel = await el.getAttribute('aria-label') || '';
-        const text = await el.innerText().catch(() => '');
-        console.log(`[compose] Found element: ${sel} (aria: "${ariaLabel}", text: "${text}")`);
-        btn = el;
-        break;
-      }
-    } catch {}
-  }
+  // STEP 2: Find and click the "Message" button using Playwright's text matching
+  // The button text is "Message [FirstName] [LastName]" — it's the envelope icon
+  console.log('[compose] Looking for Message button in profile panel...');
 
-  // Strategy 2: Inspect ALL elements in the card to find the envelope icon
-  if (!btn) {
-    console.log('[compose] Scanning all card elements for message/envelope icon...');
-    try {
-      // Log everything in the card for debugging
-      const allElements = await searchScope.$$('a, button, span[role="button"], div[role="button"]');
-      console.log(`[compose] Found ${allElements.length} clickable elements in card`);
-      
-      for (let i = 0; i < allElements.length; i++) {
-        const el = allElements[i];
-        const ariaLabel = await el.getAttribute('aria-label') || '';
-        const title = await el.getAttribute('title') || '';
-        const className = await el.getAttribute('class') || '';
-        const tag = await el.evaluate(e => e.tagName.toLowerCase());
-        const href = await el.getAttribute('href') || '';
-        const dataControl = await el.getAttribute('data-control-name') || '';
-        const text = await el.innerText().catch(() => '');
-        
-        console.log(`[compose]   [${i}] <${tag}> aria="${ariaLabel}" title="${title}" class="${className.substring(0,80)}" href="${href.substring(0,60)}" data-control="${dataControl}" text="${text.substring(0,30)}"`);
-        
-        // Match: message, inmail, mail, envelope, compose, send
-        const searchText = `${ariaLabel} ${title} ${className} ${dataControl} ${href}`.toLowerCase();
-        if (searchText.includes('message') || 
-            searchText.includes('inmail') || 
-            searchText.includes('mail') ||
-            searchText.includes('compose') ||
-            searchText.includes('send-inmail') ||
-            searchText.includes('inmails')) {
-          console.log(`[compose] ✓ Found message element at index ${i}`);
-          btn = el;
-          break;
-        }
-      }
+  let clicked = false;
 
-      // If still no match, look for the icon AFTER the Archive button by position
-      if (!btn) {
-        console.log('[compose] Trying positional detection: icon after Archive button...');
-        const archiveBtn = await searchScope.$('button:has-text("Archive"), a:has-text("Archive"), [aria-label*="Archive"]');
-        if (archiveBtn) {
-          // Get the next sibling elements after Archive
-          const sibling = await archiveBtn.evaluate(el => {
-            let next = el.nextElementSibling;
-            const siblings = [];
-            while (next) {
-              siblings.push({
-                tag: next.tagName.toLowerCase(),
-                class: next.className.toString().substring(0, 80),
-                aria: next.getAttribute('aria-label') || '',
-                title: next.getAttribute('title') || '',
-              });
-              next = next.nextElementSibling;
-            }
-            return siblings;
-          });
-          console.log(`[compose] Elements after Archive: ${JSON.stringify(sibling)}`);
-          
-          // Click the first link/button after Archive (should be the envelope)
-          const nextEl = await archiveBtn.evaluate(el => {
-            let next = el.nextElementSibling;
-            while (next) {
-              if (next.tagName === 'A' || next.tagName === 'BUTTON') return true;
-              next = next.nextElementSibling;
-            }
-            return false;
-          });
-          if (nextEl) {
-            btn = await searchScope.evaluateHandle(el => {
-              const archive = el.querySelector('button[class*="archive"], a[class*="archive"], [aria-label*="Archive"]') ||
-                             Array.from(el.querySelectorAll('button, a')).find(e => e.textContent.includes('Archive'));
-              if (archive) {
-                let next = archive.nextElementSibling;
-                while (next) {
-                  if (next.tagName === 'A' || next.tagName === 'BUTTON') return next;
-                  next = next.nextElementSibling;
-                }
-              }
-              return null;
-            });
-            if (btn) {
-              console.log('[compose] ✓ Found element after Archive button (likely envelope icon)');
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.log(`[compose] Element scan failed: ${err.message}`);
-    }
-  }
-
-  // Strategy 3: Click candidate name to open profile panel, then find envelope in the panel
-  if (!btn) {
-    console.log('[compose] No message icon in card DOM. Opening candidate profile panel...');
-    try {
-      const nameLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
-      if (nameLink) {
-        await nameLink.click({ force: true });
-        await page.waitForTimeout(4000);
-        await takeScreenshot('profile-panel-opened');
-        
-        // Now search the ENTIRE PAGE for the envelope/message icon
-        // In the profile panel, the action bar has: Change stage | Archive | ✉️ | ↗️ | ⋯
-        console.log('[compose] Searching page for message icon in profile panel...');
-        
-        // First, let's log what's near the Archive button on the page
-        const pageActionElements = await page.$$('button, a');
-        let archiveFound = false;
-        let archiveIndex = -1;
-        
-        for (let i = 0; i < pageActionElements.length; i++) {
-          const el = pageActionElements[i];
-          const text = await el.innerText().catch(() => '');
-          const aria = await el.getAttribute('aria-label') || '';
-          if (text.includes('Archive') || aria.includes('Archive')) {
-            archiveIndex = i;
-            archiveFound = true;
-            console.log(`[compose] Found Archive button at page element index ${i}`);
-            
-            // Log the next 5 elements after Archive (one of them should be the envelope)
-            for (let j = i + 1; j < Math.min(i + 6, pageActionElements.length); j++) {
-              const nextEl = pageActionElements[j];
-              const nextAria = await nextEl.getAttribute('aria-label') || '';
-              const nextTitle = await nextEl.getAttribute('title') || '';
-              const nextClass = await nextEl.getAttribute('class') || '';
-              const nextText = await nextEl.innerText().catch(() => '');
-              const nextTag = await nextEl.evaluate(e => e.tagName.toLowerCase());
-              const nextHref = await nextEl.getAttribute('href') || '';
-              console.log(`[compose]   Archive+${j-i}: <${nextTag}> aria="${nextAria}" title="${nextTitle}" text="${nextText.substring(0,20)}" class="${nextClass.substring(0,60)}" href="${nextHref.substring(0,40)}"`);
-            }
-            break;
-          }
-        }
-        
-        // Direct approach: find the button whose text starts with "Message"
-        // This is the envelope icon — its text is "Message [CandidateName]"
-        if (!btn) {
-          console.log('[compose] Looking for "Message" button by text...');
-          const allBtns = await page.$$('button');
-          for (const b of allBtns) {
-            const text = await b.innerText().catch(() => '');
-            if (text.startsWith('Message ')) {
-              const isVis = await b.isVisible().catch(() => false);
-              if (isVis) {
-                console.log(`[compose] ✓ Found "Message" button: "${text.substring(0, 40)}"`);
-                btn = b;
-                break;
-              }
-            }
-          }
-        }
-
-        // Fallback: use Archive+1 positioning
-        if (!btn && archiveFound && archiveIndex >= 0) {
-          const envelopeCandidate = pageActionElements[archiveIndex + 1];
-          if (envelopeCandidate) {
-            const isVisible = await envelopeCandidate.isVisible().catch(() => false);
-            if (isVisible) {
-              console.log('[compose] ✓ Using Archive+1 element as envelope icon');
-              btn = envelopeCandidate;
-            }
-          }
-        }
-        
-        // Fallback: try direct page selectors
-        if (!btn) {
-          const panelMessageSelectors = [
-            'a[aria-label*="Send InMail"]',
-            'button[aria-label*="Send InMail"]',
-            'a[aria-label*="Message"]',
-            'button[aria-label*="Message"]',
-            '[data-control-name*="message"]',
-            '[data-control-name*="inmail"]',
-            'a[href*="inmails"]',
-          ];
-          for (const sel of panelMessageSelectors) {
-            try {
-              const el = await page.$(sel);
-              if (el) {
-                const isVis = await el.isVisible().catch(() => false);
-                if (isVis) {
-                  console.log(`[compose] ✓ Found via page selector: ${sel}`);
-                  btn = el;
-                  break;
-                }
-              }
-            } catch {}
-          }
-        }
-      }
-    } catch (err) {
-      console.log(`[compose] Profile panel approach failed: ${err.message}`);
-    }
-
-    btn = await trySelector(page, SELECTORS.messageButton, { timeout: 8000 });
-  }
-
-  if (!btn) {
-    // Take a screenshot for debugging
-    await takeScreenshot('no-message-button');
-    throw new Error('Could not find Message/InMail button');
-  }
-
-  // Try multiple click strategies
-  console.log('[compose] Clicking message button...');
+  // Approach 1: Use Playwright's getByRole with name matching "Message"
   try {
-    // Strategy A: force click
-    await btn.click({ force: true });
-    console.log('[compose] Click strategy A (force) executed');
-  } catch (err) {
-    console.log(`[compose] Force click failed: ${err.message}`);
-    try {
-      // Strategy B: scroll into view and regular click
-      await btn.scrollIntoViewIfNeeded();
+    // Find all buttons, look for one starting with "Message "
+    const messageBtn = await page.evaluateHandle(() => {
+      const buttons = Array.from(document.querySelectorAll('button'));
+      return buttons.find(b => {
+        const text = b.textContent.trim();
+        return text.startsWith('Message ') && b.offsetParent !== null; // visible
+      }) || null;
+    });
+    
+    if (messageBtn && await messageBtn.evaluate(el => el !== null)) {
+      const btnText = await messageBtn.evaluate(el => el.textContent.trim().substring(0, 50));
+      console.log(`[compose] Found Message button: "${btnText}"`);
+      
+      // Click using JavaScript directly on the DOM element
+      await messageBtn.evaluate(el => {
+        el.scrollIntoView({ block: 'center' });
+      });
       await page.waitForTimeout(500);
-      await btn.click();
-      console.log('[compose] Click strategy B (scroll+click) executed');
-    } catch (err2) {
-      console.log(`[compose] Scroll+click failed: ${err2.message}`);
-      try {
-        // Strategy C: JavaScript click
-        await btn.evaluate(el => el.click());
-        console.log('[compose] Click strategy C (JS click) executed');
-      } catch (err3) {
-        console.log(`[compose] JS click failed: ${err3.message}`);
-      }
+      
+      // Try JS click first (most reliable for LinkedIn's Ember.js components)
+      await messageBtn.evaluate(el => el.click());
+      console.log('[compose] ✓ JS click on Message button executed');
+      clicked = true;
+    }
+  } catch (err) {
+    console.log(`[compose] Approach 1 (JS find+click) failed: ${err.message}`);
+  }
+
+  // Approach 2: Use Playwright's page.click with text selector
+  if (!clicked) {
+    try {
+      console.log('[compose] Trying Playwright text-based click...');
+      await page.click('button:has-text("Message")', { timeout: 5000, force: true });
+      console.log('[compose] ✓ Playwright text click executed');
+      clicked = true;
+    } catch (err) {
+      console.log(`[compose] Approach 2 (text click) failed: ${err.message}`);
     }
   }
-  
+
+  // Approach 3: Find via Archive button position, then use dispatchEvent
+  if (!clicked) {
+    try {
+      console.log('[compose] Trying Archive+1 with dispatchEvent...');
+      const result = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const archiveBtn = buttons.find(b => b.textContent.trim() === 'Archive');
+        if (!archiveBtn) return { found: false, reason: 'No Archive button' };
+        
+        let next = archiveBtn.nextElementSibling;
+        while (next) {
+          if (next.tagName === 'BUTTON' || next.tagName === 'A') {
+            next.scrollIntoView({ block: 'center' });
+            // Fire full click event sequence
+            next.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            next.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            next.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            next.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            return { found: true, text: next.textContent.trim().substring(0, 50) };
+          }
+          next = next.nextElementSibling;
+        }
+        return { found: false, reason: 'No element after Archive' };
+      });
+      console.log(`[compose] Archive+1 dispatchEvent result: ${JSON.stringify(result)}`);
+      if (result.found) clicked = true;
+    } catch (err) {
+      console.log(`[compose] Approach 3 (dispatchEvent) failed: ${err.message}`);
+    }
+  }
+
+  // Approach 4: Click the Messages tab in the profile panel instead
+  if (!clicked) {
+    try {
+      console.log('[compose] Trying Messages tab in profile panel...');
+      await page.click('a:has-text("Messages")', { timeout: 5000 });
+      console.log('[compose] ✓ Clicked Messages tab');
+      clicked = true;
+    } catch (err) {
+      console.log(`[compose] Approach 4 (Messages tab) failed: ${err.message}`);
+    }
+  }
+
+  if (!clicked) {
+    await takeScreenshot('all-compose-approaches-failed');
+    throw new Error('All message compose approaches failed');
+  }
+
   await page.waitForTimeout(3000);
   await takeScreenshot('after-message-click');
-  
-  // Verify a compose dialog opened (look for subject or body input)
+
+  // STEP 3: Verify compose dialog opened
   const composeOpen = await trySelector(page, SELECTORS.subjectInput, { timeout: 8000 }) ||
                       await trySelector(page, SELECTORS.messageBody, { timeout: 5000 });
-  if (!composeOpen) {
-    console.log('[compose] Compose dialog may not have opened, taking screenshot...');
-    await takeScreenshot('compose-not-open');
-    
-    // Last resort: try clicking "Messages" tab in profile panel
-    console.log('[compose] Trying Messages tab in profile panel...');
-    try {
-      const messagesTab = await page.$('a:has-text("Messages"), button:has-text("Messages")');
-      if (messagesTab) {
-        await messagesTab.click({ force: true });
-        await page.waitForTimeout(3000);
-        console.log('[compose] Clicked Messages tab');
-        await takeScreenshot('messages-tab-clicked');
-      }
-    } catch (e) {
-      console.log(`[compose] Messages tab click failed: ${e.message}`);
-    }
-  } else {
+  if (composeOpen) {
     console.log('[compose] ✓ Compose dialog detected');
+  } else {
+    console.log('[compose] Compose dialog not detected — checking for new message area...');
+    await takeScreenshot('compose-detection-failed');
+    
+    // Maybe the compose area uses different selectors — check what's on page
+    const inputs = await page.$$('input, textarea, [contenteditable="true"], [role="textbox"]');
+    console.log(`[compose] Found ${inputs.length} input-like elements on page`);
+    for (let i = 0; i < inputs.length; i++) {
+      const el = inputs[i];
+      const tag = await el.evaluate(e => e.tagName.toLowerCase());
+      const type = await el.getAttribute('type') || '';
+      const placeholder = await el.getAttribute('placeholder') || '';
+      const aria = await el.getAttribute('aria-label') || '';
+      const cls = await el.getAttribute('class') || '';
+      const isVis = await el.isVisible().catch(() => false);
+      if (isVis) {
+        console.log(`[compose]   Input[${i}]: <${tag}> type="${type}" placeholder="${placeholder}" aria="${aria}" class="${cls.substring(0,60)}"`);
+      }
+    }
   }
-  
+
   return true;
 }
 
