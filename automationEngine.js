@@ -75,19 +75,31 @@ const SELECTORS = {
     'input[placeholder*="Subject"]',
     'input[placeholder*="subject"]',
     '[class*="subject"] input',
+    'input[aria-label*="Subject"]',
+    'input[aria-label*="subject"]',
   ],
   messageBody: [
     '[data-test-inmail-body]',
     'div[contenteditable="true"][role="textbox"]',
     'div[contenteditable="true"]',
     'textarea[name="body"]',
+    'textarea[name="message"]',
     'textarea',
     '[class*="message-body"] [contenteditable]',
+    '[role="textbox"]',
+    '[aria-label*="message body"]',
+    '[aria-label*="Write a message"]',
+    '[placeholder*="Write a message"]',
+    '[class*="msg-form"] [contenteditable]',
+    '[class*="compose"] [contenteditable]',
+    '[class*="inmail"] [contenteditable]',
+    '[class*="compose"] textarea',
   ],
   sendButton: [
     'button[data-test-send-inmail-button]',
     'button:has-text("Send")',
     '[class*="send"] button',
+    'button[aria-label*="Send"]',
   ],
   pipelineStage: [
     'button:has-text("Change stage")',
@@ -740,8 +752,29 @@ async function fillSubject(subject) {
 }
 
 async function fillMessageBody(message) {
-  const el = await trySelector(page, SELECTORS.messageBody, { timeout: 5000 });
-  if (!el) throw new Error('Could not find message body field');
+  let el = await trySelector(page, SELECTORS.messageBody, { timeout: 8000 });
+  
+  if (!el) {
+    // Extra attempt: look for ANY contenteditable or textarea on the page
+    console.log('[compose] Standard selectors failed, scanning for any text input...');
+    const inputs = await page.$$('div[contenteditable="true"], textarea, [role="textbox"]');
+    for (const input of inputs) {
+      const isVis = await input.isVisible().catch(() => false);
+      if (isVis) {
+        const cls = await input.getAttribute('class') || '';
+        const aria = await input.getAttribute('aria-label') || '';
+        const placeholder = await input.getAttribute('placeholder') || '';
+        console.log(`[compose] Found visible input: class="${cls.substring(0,60)}" aria="${aria}" placeholder="${placeholder}"`);
+        el = input;
+        break;
+      }
+    }
+  }
+  
+  if (!el) {
+    await takeScreenshot('no-message-body');
+    throw new Error('Could not find message body field');
+  }
 
   await el.click();
   await page.waitForTimeout(500);
@@ -978,7 +1011,7 @@ async function runOutreach(options = {}) {
         failed++;
         processed++;
         store.updateRun(runId, { processed, succeeded, failed, skipped });
-        broadcast('candidate_error', { index: i + 1, error: err.message });
+        broadcast('candidate_error', { index: processed, error: err.message });
 
         // Try to close any open dialogs
         await closeMessageDialog();
