@@ -833,7 +833,7 @@ async function fillMessageBody(message) {
       }
       
       if (!el) {
-        throw new Error(`Non-compose dialog detected (${checkboxes.length} checkboxes, no message body) — may be out of InMail credits or template selector blocking compose`);
+        throw new Error(`Candidate does not accept InMails (non-compose dialog with ${checkboxes.length} checkboxes) — skipping`);
       }
     }
     await takeScreenshot('no-message-body');
