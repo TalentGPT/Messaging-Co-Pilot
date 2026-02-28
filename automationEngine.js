@@ -809,9 +809,32 @@ async function fillMessageBody(message) {
     // Check if we hit an InMail credits / template selection dialog (lots of checkboxes, no text body)
     const checkboxes = await page.$$('input[type="checkbox"]');
     if (checkboxes.length > 3) {
-      await takeScreenshot('inmail-credits-dialog');
-      console.log(`[compose] Detected non-compose dialog (${checkboxes.length} checkboxes) — likely InMail credits or template selector`);
-      throw new Error(`Non-compose dialog detected (${checkboxes.length} checkboxes, no message body) — may be out of InMail credits`);
+      await takeScreenshot('checkbox-dialog');
+      console.log(`[compose] Detected non-compose dialog (${checkboxes.length} checkboxes) — likely template selector or recipient picker`);
+      
+      // Try to find and click through it — look for a "Next", "Continue", "Send", or "Skip" button
+      const actionBtns = await page.$$('button');
+      for (const btn of actionBtns) {
+        const text = (await btn.innerText().catch(() => '')).trim().toLowerCase();
+        if (['next', 'continue', 'skip', 'write a message'].includes(text)) {
+          console.log(`[compose] Found action button: "${text}" — clicking to advance past dialog`);
+          await btn.click();
+          await page.waitForTimeout(2000);
+          await takeScreenshot('after-checkbox-advance');
+          // Re-check for message body after advancing
+          const retryBody = await trySelector(page, SELECTORS.messageBody, { timeout: 5000 }) ||
+                            await page.$('div[contenteditable="true"]:visible, textarea:visible, [role="textbox"]:visible');
+          if (retryBody) {
+            console.log('[compose] ✓ Found message body after advancing past dialog');
+            el = retryBody;
+            break;
+          }
+        }
+      }
+      
+      if (!el) {
+        throw new Error(`Non-compose dialog detected (${checkboxes.length} checkboxes, no message body) — may be out of InMail credits or template selector blocking compose`);
+      }
     }
     await takeScreenshot('no-message-body');
     throw new Error('Could not find message body field');
@@ -993,10 +1016,11 @@ async function runOutreach(options = {}) {
       const card = cards[cardIndex];
       cardIndex++;
       let candidateId;
+      let info = null;
 
       try {
         // Extract candidate info
-        const info = await extractCandidateInfo(card);
+        info = await extractCandidateInfo(card);
 
         // Skip candidates with no extractable info (stale DOM, failed extraction)
         if (info.name === 'Unknown' && !info.linkedin_url) {
