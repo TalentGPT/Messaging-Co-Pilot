@@ -1037,6 +1037,17 @@ async function runOutreach(options = {}) {
           continue;
         }
 
+        // Skip known problematic candidates (non-standard compose dialogs)
+        const SKIP_LIST = (process.env.SKIP_CANDIDATES || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        if (SKIP_LIST.includes(info.name.toLowerCase())) {
+          console.log(`[run] Skipping blocklisted candidate: ${info.name}`);
+          processedNames.add(info.name);
+          skipped++;
+          processed++;
+          store.updateRun(runId, { processed, succeeded, failed, skipped });
+          continue;
+        }
+
         console.log(`[run] Processing ${processed + 1}/${maxCandidates}: ${info.name}`);
         broadcast('processing_candidate', { index: processed + 1, total: maxCandidates, name: info.name });
 
