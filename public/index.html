@@ -82,6 +82,14 @@
   textarea.cookie-editor { width: 100%; min-height: 120px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'SF Mono', 'Consolas', monospace; font-size: 12px; line-height: 1.4; resize: vertical; margin-bottom: 12px; }
   textarea.cookie-editor:focus { outline: none; border-color: var(--accent); }
   .cookie-status-line { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
+  /* Feedback */
+  .feedback-area { margin-top: 8px; }
+  .feedback-input { width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; resize: vertical; min-height: 40px; font-family: inherit; }
+  .feedback-input:focus { outline: none; border-color: var(--accent); }
+  .feedback-actions { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
+  .regen-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .version-badge { font-size: 10px; color: var(--muted); background: rgba(148,163,184,.1); padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
 </style>
 </head>
 <body>
@@ -269,25 +277,40 @@ function renderCandidate(c) {
     sent: '<span class="badge badge-green">Sent</span>',
     error: '<span class="badge badge-red">Error</span>',
     skipped: '<span class="badge badge-gray">Skipped</span>',
+    regenerating: '<span class="badge badge-blue"><span class="regen-spinner"></span> Regenerating</span>',
   }[c.status] || `<span class="badge badge-gray">${c.status}</span>`;
 
-  const actions = c.status === 'pending_review' ? `
-    <div class="actions">
-      <button class="btn-sm btn-green" onclick="approve('${c.id}')">✓ Approve</button>
-      <button class="btn-sm btn-outline" onclick="skip('${c.id}')">Skip</button>
-    </div>` : '';
-
   const msg = c.tuned_message || c.message || '';
-  const msgPreview = msg ? `<div class="msg-preview">${escHtml(msg)}</div>` : '';
-  const subj = c.subject ? `<div style="font-size:12px;color:var(--accent)">Subject: ${escHtml(c.subject)}</div>` : '';
+  const msgPreview = msg ? `<div class="msg-preview" id="msg-${c.id}">${escHtml(msg)}</div>` : '';
+  const subj = c.subject ? `<div style="font-size:12px;color:var(--accent)" id="subj-${c.id}">Subject: ${escHtml(c.subject)}</div>` : '';
   const err = c.error ? `<div style="font-size:12px;color:var(--red);margin-top:4px">Error: ${escHtml(c.error)}</div>` : '';
+  const regenCount = c.regenCount ? `<span class="version-badge">v${c.regenCount + 1}</span>` : '';
+
+  // Show feedback/regenerate for any candidate with a message (dry_run, pending_review, etc.) but not sent
+  const canFeedback = msg && c.status !== 'sent' && c.status !== 'skipped' && c.status !== 'regenerating';
+  const feedbackSection = canFeedback ? `
+    <div class="feedback-area" id="fb-area-${c.id}">
+      <div class="feedback-actions">
+        <button class="btn-sm btn-green" onclick="approve('${c.id}')">✅ Approve</button>
+        <button class="btn-sm btn-outline" onclick="showFeedbackInput('${c.id}')">✏️ Give Feedback</button>
+        <button class="btn-sm btn-outline" onclick="skip('${c.id}')">Skip</button>
+      </div>
+      <div id="fb-input-${c.id}" style="display:none;margin-top:8px">
+        <textarea class="feedback-input" id="fb-text-${c.id}" placeholder="What should be different? e.g. 'Too formal, make it more casual' or 'Don't mention equity'"></textarea>
+        <div class="feedback-actions" style="margin-top:6px">
+          <button class="btn-sm btn-primary" style="background:var(--accent)" onclick="regenerate('${c.id}')">🔄 Regenerate</button>
+          <button class="btn-sm btn-outline" onclick="hideFeedbackInput('${c.id}')">Cancel</button>
+          <span id="fb-status-${c.id}" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </div>
+    </div>` : (c.status === 'sent' ? '<div style="margin-top:6px"><span class="badge badge-green">✓ Sent</span></div>' : '');
 
   return `<div class="candidate-card" id="cand-${c.id}">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <div><span class="name">${escHtml(c.name)}</span> ${statusBadge}</div>
+      <div><span class="name">${escHtml(c.name)}</span> ${statusBadge} ${regenCount}</div>
     </div>
     <div class="headline">${escHtml(c.headline || '')}</div>
-    ${subj}${msgPreview}${err}${actions}
+    ${subj}${msgPreview}${err}${feedbackSection}
   </div>`;
 }
 
@@ -448,8 +471,80 @@ function handleEvent(msg) {
       log('Stop requested...', 'info'); break;
     case 'status':
       log(msg.message || '', 'info'); break;
+    case 'prompt_evolved':
+      handlePromptEvolved(msg); break;
     default:
       if (msg.event !== 'connected') log(JSON.stringify(msg), '');
+  }
+}
+
+// ── Feedback & Regeneration ──
+
+function showFeedbackInput(id) {
+  document.getElementById(`fb-input-${id}`).style.display = 'block';
+  document.getElementById(`fb-text-${id}`).focus();
+}
+
+function hideFeedbackInput(id) {
+  document.getElementById(`fb-input-${id}`).style.display = 'none';
+  document.getElementById(`fb-text-${id}`).value = '';
+}
+
+async function regenerate(id) {
+  const feedbackEl = document.getElementById(`fb-text-${id}`);
+  const feedback = feedbackEl.value.trim();
+  if (!feedback) { alert('Please enter your feedback before regenerating.'); feedbackEl.focus(); return; }
+
+  const statusEl = document.getElementById(`fb-status-${id}`);
+  statusEl.innerHTML = '<span class="regen-spinner"></span> Regenerating...';
+
+  // Update local state to show regenerating
+  if (candidates[id]) {
+    const prevStatus = candidates[id].status;
+    candidates[id]._prevStatus = prevStatus;
+    candidates[id].status = 'regenerating';
+    refreshCandidates();
+  }
+
+  try {
+    const resp = await fetch(`/api/regenerate/${id}`, {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ feedback })
+    });
+    const data = await resp.json();
+    if (data.error) {
+      alert('Regeneration failed: ' + data.error);
+      if (candidates[id]) { candidates[id].status = candidates[id]._prevStatus || 'dry_run'; refreshCandidates(); }
+      return;
+    }
+
+    // Update candidate with new message
+    if (candidates[id]) {
+      candidates[id].message = data.message;
+      candidates[id].tuned_message = data.message;
+      candidates[id].status = candidates[id]._prevStatus || 'dry_run';
+      candidates[id].regenCount = (candidates[id].regenCount || 0) + 1;
+      refreshCandidates();
+    }
+
+    log(`🔄 Regenerated message for ${candidates[id]?.name || id} (feedback: "${feedback.substring(0, 40)}...")`, 'success');
+    
+    if (data.feedbackCount && data.feedbackCount % 3 === 0) {
+      log(`🧬 Prompt auto-evolving based on ${data.feedbackCount} feedback items...`, 'info');
+    }
+  } catch (e) {
+    alert('Regeneration failed: ' + e.message);
+    if (candidates[id]) { candidates[id].status = candidates[id]._prevStatus || 'dry_run'; refreshCandidates(); }
+  }
+}
+
+// Handle prompt evolution events from WebSocket
+function handlePromptEvolved(msg) {
+  log(`🧬 Prompt "${msg.promptName}" auto-evolved to v${msg.version} based on your feedback!`, 'success');
+  // Refresh prompt editor if open
+  const body = document.getElementById('prompt-body');
+  if (!body.classList.contains('collapsed')) {
+    loadPromptData();
   }
 }
 

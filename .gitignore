@@ -6,3 +6,4 @@ screenshots/
 *.sqlite
 cookies.json
 prompts.json
+prompt-versions.json

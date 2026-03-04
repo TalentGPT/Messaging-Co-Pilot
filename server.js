@@ -19,7 +19,7 @@ const engine = require('./automationEngine');
 console.log('  engine OK');
 const { startTunnel } = require('./tunnel');
 console.log('  tunnel OK');
-const { RECRUITER_PROMPT, SALES_PROMPT } = require('./messageGenerator');
+const { RECRUITER_PROMPT, SALES_PROMPT, regenerateWithFeedback, evolvePrompt, formatUserPrompt } = require('./messageGenerator');
 console.log('All modules loaded.');
 
 // ── Prompt Storage ──
@@ -38,6 +38,52 @@ function loadPrompts() {
 
 function savePrompts(data) {
   fs.writeFileSync(PROMPTS_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+
+// ── Prompt Version History ──
+const PROMPT_VERSIONS_FILE = path.join(__dirname, 'prompt-versions.json');
+
+function loadPromptVersions() {
+  try {
+    if (fs.existsSync(PROMPT_VERSIONS_FILE)) {
+      return JSON.parse(fs.readFileSync(PROMPT_VERSIONS_FILE, 'utf8'));
+    }
+  } catch (e) {
+    console.error('[versions] Failed to load prompt-versions.json:', e.message);
+  }
+  return { versions: [], feedbackLog: [] };
+}
+
+function savePromptVersions(data) {
+  fs.writeFileSync(PROMPT_VERSIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+
+let versionStore = loadPromptVersions();
+
+function logPromptVersion(promptName, promptText, trigger, feedbackItems) {
+  const version = {
+    id: Date.now(),
+    version: (versionStore.versions.filter(v => v.promptName === promptName).length) + 1,
+    promptName,
+    promptLength: promptText.length,
+    trigger,  // 'manual' | 'feedback_evolution'
+    feedbackItems: feedbackItems || [],
+    timestamp: new Date().toISOString(),
+  };
+  versionStore.versions.push(version);
+  // Keep last 50 versions
+  if (versionStore.versions.length > 50) versionStore.versions = versionStore.versions.slice(-50);
+  savePromptVersions(versionStore);
+  return version;
+}
+
+function logFeedback(candidateId, candidateName, feedback, promptName) {
+  const entry = { candidateId, candidateName, feedback, promptName, timestamp: new Date().toISOString() };
+  versionStore.feedbackLog.push(entry);
+  // Keep last 200 feedback entries
+  if (versionStore.feedbackLog.length > 200) versionStore.feedbackLog = versionStore.feedbackLog.slice(-200);
+  savePromptVersions(versionStore);
+  return entry;
 }
 
 let promptStore = loadPrompts();
@@ -257,6 +303,89 @@ app.delete('/api/prompt/:name', auth, (req, res) => {
 app.get('/api/prompt/active', auth, (req, res) => {
   const activePrompt = promptStore.active ? promptStore.saved[promptStore.active] : null;
   res.json({ active: promptStore.active, prompt: activePrompt });
+});
+
+// ── Regenerate with Feedback ──
+
+app.post('/api/regenerate/:id', auth, async (req, res) => {
+  const { feedback } = req.body;
+  const candidateId = req.params.id;
+  
+  if (!feedback || !feedback.trim()) {
+    return res.status(400).json({ error: 'feedback is required' });
+  }
+
+  const candidate = store.getCandidate(candidateId);
+  if (!candidate) {
+    return res.status(404).json({ error: 'Candidate not found' });
+  }
+
+  try {
+    // Determine which prompt was used
+    const activePromptName = promptStore.active;
+    const currentPrompt = activePromptName 
+      ? promptStore.saved[activePromptName] 
+      : (process.env.OUTREACH_MODE === 'sales' ? SALES_PROMPT : RECRUITER_PROMPT);
+    const originalMessage = candidate.tuned_message || candidate.message || '';
+
+    // Log the feedback
+    logFeedback(candidateId, candidate.name, feedback, activePromptName || 'default');
+
+    // Regenerate message with feedback
+    console.log(`[regenerate] Regenerating for ${candidate.name} with feedback: "${feedback.substring(0, 60)}..."`);
+    const profileData = candidate.profile_data || { name: candidate.name, headline: candidate.headline };
+    const newMessage = await regenerateWithFeedback(profileData, currentPrompt, originalMessage, feedback, process.env.OUTREACH_MODE || 'recruiter');
+
+    // Update candidate with new message
+    store.updateCandidate(candidateId, { 
+      message: newMessage, 
+      tuned_message: newMessage,
+      status: candidate.status  // keep same status
+    });
+
+    // Check if we should evolve the prompt (every 3 feedback items for the same prompt)
+    const recentFeedback = versionStore.feedbackLog.filter(f => f.promptName === (activePromptName || 'default'));
+    if (recentFeedback.length > 0 && recentFeedback.length % 3 === 0 && activePromptName) {
+      // Auto-evolve the prompt in background
+      console.log(`[evolve] Auto-evolving prompt "${activePromptName}" after ${recentFeedback.length} feedback items`);
+      const lastThree = recentFeedback.slice(-3);
+      evolvePrompt(currentPrompt, lastThree).then(evolvedPrompt => {
+        if (evolvedPrompt && evolvedPrompt !== currentPrompt) {
+          promptStore.saved[activePromptName] = evolvedPrompt;
+          savePrompts(promptStore);
+          const ver = logPromptVersion(activePromptName, evolvedPrompt, 'feedback_evolution', lastThree.map(f => f.feedback));
+          console.log(`[evolve] Prompt "${activePromptName}" evolved to v${ver.version}`);
+          broadcast({ event: 'prompt_evolved', promptName: activePromptName, version: ver.version });
+        }
+      }).catch(err => {
+        console.error(`[evolve] Failed to evolve prompt: ${err.message}`);
+      });
+    }
+
+    console.log(`[regenerate] New message generated for ${candidate.name} (${newMessage.length} chars)`);
+    
+    res.json({ 
+      status: 'regenerated', 
+      candidateId, 
+      message: newMessage,
+      feedbackCount: recentFeedback.length,
+    });
+  } catch (err) {
+    console.error(`[regenerate] Error: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get prompt version history
+app.get('/api/prompt/versions', auth, (req, res) => {
+  const promptName = req.query.name || promptStore.active || 'all';
+  const versions = promptName === 'all' 
+    ? versionStore.versions 
+    : versionStore.versions.filter(v => v.promptName === promptName);
+  const feedback = promptName === 'all'
+    ? versionStore.feedbackLog
+    : versionStore.feedbackLog.filter(f => f.promptName === promptName);
+  res.json({ versions: versions.slice(-20), feedback: feedback.slice(-20) });
 });
 
 // ── Cookie Management (multi-user) ──

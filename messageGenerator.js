@@ -290,4 +290,102 @@ async function generateOutreachMessage(candidateInfo, mode, customPrompt) {
   };
 }
 
-module.exports = { generateOutreachMessage, formatUserPrompt, RECRUITER_PROMPT, SALES_PROMPT };
+// Regenerate a message incorporating user feedback into the prompt
+async function regenerateWithFeedback(candidateInfo, originalPrompt, originalMessage, feedback, mode) {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const profileText = formatUserPrompt(candidateInfo);
+
+  // Build a meta-prompt that incorporates the feedback
+  const feedbackSystemPrompt = `${originalPrompt}
+
+--- FEEDBACK LOOP ---
+You previously generated the following message for this candidate:
+
+"""
+${originalMessage}
+"""
+
+The user provided this feedback:
+"${feedback}"
+
+Now generate an IMPROVED message that addresses the feedback while still following all the original instructions above.
+Apply the feedback as a permanent style/content adjustment — not just a one-time fix.
+--- END FEEDBACK LOOP ---`;
+
+  // Inject profile data using all placeholder formats
+  const hasPlaceholder = feedbackSystemPrompt.includes('<<<>>>') ||
+    feedbackSystemPrompt.includes('[INSERT PROFILE DATA HERE]') ||
+    feedbackSystemPrompt.includes('{{CANDIDATE_PROFILE_JSON_OR_TEXT}}') ||
+    /\{\{CANDIDATE_PROFILE\}\}/i.test(feedbackSystemPrompt);
+
+  let finalPrompt;
+  if (hasPlaceholder) {
+    finalPrompt = feedbackSystemPrompt
+      .replace('<<<>>>', profileText)
+      .replace('[INSERT PROFILE DATA HERE]', profileText)
+      .replace('{{CANDIDATE_PROFILE_JSON_OR_TEXT}}', profileText)
+      .replace(/\{\{CANDIDATE_PROFILE\}\}/gi, profileText);
+  } else {
+    finalPrompt = feedbackSystemPrompt + '\n\n--- CANDIDATE PROFILE ---\n' + profileText;
+  }
+
+  console.log(`[messageGen] Regenerating with feedback: "${feedback.substring(0, 80)}..."`);
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    temperature: 0.7,
+    max_tokens: 600,
+    messages: [
+      { role: 'system', content: finalPrompt },
+      { role: 'user', content: profileText },
+    ],
+  });
+
+  return response.choices[0]?.message?.content || '';
+}
+
+// Take feedback and distill it into a prompt improvement
+async function evolvePrompt(currentPrompt, feedbackHistory) {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const feedbackSummary = feedbackHistory.map((f, i) =>
+    `${i + 1}. Feedback: "${f.feedback}" (for candidate: ${f.candidateName})`
+  ).join('\n');
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    temperature: 0.3,
+    max_tokens: 2000,
+    messages: [
+      {
+        role: 'system',
+        content: `You are a prompt engineering expert. Your job is to improve an outreach prompt based on user feedback.
+
+Rules:
+- Keep the original prompt's intent, structure, and format intact
+- Integrate the feedback as permanent improvements to the instructions
+- Do NOT add feedback-specific language — generalize the improvements
+- Do NOT add commentary — return ONLY the improved prompt
+- Preserve all placeholders (<<<>>>, {{CANDIDATE_PROFILE}}, [INSERT PROFILE DATA HERE]) exactly as they are`
+      },
+      {
+        role: 'user',
+        content: `Here is the current prompt:
+
+---START PROMPT---
+${currentPrompt}
+---END PROMPT---
+
+Here is the feedback from users reviewing generated messages:
+
+${feedbackSummary}
+
+Return the improved prompt with the feedback incorporated as permanent improvements.`
+      }
+    ],
+  });
+
+  return response.choices[0]?.message?.content || currentPrompt;
+}
+
+module.exports = { generateOutreachMessage, regenerateWithFeedback, evolvePrompt, formatUserPrompt, RECRUITER_PROMPT, SALES_PROMPT };
