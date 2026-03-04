@@ -56,6 +56,24 @@
   .conn-dot.on { background: var(--green); }
   .conn-dot.off { background: var(--red); }
   .error-banner { background: rgba(239,68,68,.12); border: 1px solid var(--red); color: var(--red); padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+  /* Prompt Editor */
+  .prompt-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .prompt-header h2 { margin: 0; }
+  .prompt-toggle { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px 8px; }
+  .prompt-body { margin-top: 16px; }
+  .prompt-body.collapsed { display: none; }
+  .prompt-tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .prompt-tab { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--muted); transition: all .15s; }
+  .prompt-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .prompt-tab:hover { border-color: var(--accent); }
+  textarea.prompt-editor { width: 100%; min-height: 300px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'SF Mono', 'Consolas', monospace; font-size: 13px; line-height: 1.5; resize: vertical; margin-bottom: 12px; }
+  textarea.prompt-editor:focus { outline: none; border-color: var(--accent); }
+  .prompt-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .prompt-name-input { width: 200px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; }
+  .prompt-status { font-size: 12px; color: var(--green); margin-left: 8px; opacity: 0; transition: opacity .3s; }
+  .prompt-status.show { opacity: 1; }
+  .prompt-info { font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
+  .active-prompt-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: rgba(34,197,94,.15); color: var(--green); margin-left: 8px; }
 </style>
 </head>
 <body>
@@ -113,6 +131,32 @@
     </div>
     <button id="btn-start" class="btn-primary" onclick="startRun()">▶ Start Run</button>
     <button id="btn-stop" class="btn-stop hidden" onclick="stopRun()">⏹ Stop Run</button>
+  </div>
+
+  <!-- Prompt Editor -->
+  <div class="card" id="prompt-section">
+    <div class="prompt-header" onclick="togglePromptEditor()">
+      <h2>✏️ Prompt Editor <span id="active-prompt-name" class="active-prompt-badge" style="display:none"></span></h2>
+      <button class="prompt-toggle" id="prompt-toggle-btn">▼</button>
+    </div>
+    <div class="prompt-body collapsed" id="prompt-body">
+      <p class="prompt-info">
+        Customize the system prompt sent to OpenAI along with each candidate's LinkedIn profile.
+        Use <code>&lt;&lt;&lt;&gt;&gt;&gt;</code> or <code>{{CANDIDATE_PROFILE}}</code> as a placeholder where the profile data will be inserted.
+      </p>
+      <div class="prompt-tabs" id="prompt-tabs">
+        <button class="prompt-tab active" data-tab="recruiter" onclick="loadPromptTab('recruiter')">Recruiter (Default)</button>
+        <button class="prompt-tab" data-tab="sales" onclick="loadPromptTab('sales')">Sales (Default)</button>
+      </div>
+      <textarea class="prompt-editor" id="prompt-editor" placeholder="Enter your custom prompt here..."></textarea>
+      <div class="prompt-actions">
+        <input class="prompt-name-input" id="prompt-name" placeholder="Prompt name (e.g. 'NYC Sales Rep')" value="">
+        <button class="btn-sm btn-green" onclick="savePrompt(false)">💾 Save</button>
+        <button class="btn-sm btn-primary" onclick="savePrompt(true)" style="background:var(--accent)">💾 Save & Activate</button>
+        <button class="btn-sm btn-outline" onclick="resetToDefault()">↩ Reset to Default</button>
+        <span class="prompt-status" id="prompt-status">✓ Saved</span>
+      </div>
+    </div>
   </div>
 
   <!-- Pending Review -->
@@ -371,6 +415,158 @@ function handleEvent(msg) {
     default:
       if (msg.event !== 'connected') log(JSON.stringify(msg), '');
   }
+}
+
+// ── Prompt Editor ──
+
+let promptDefaults = { recruiter: '', sales: '' };
+let savedPrompts = {};
+let currentPromptTab = 'recruiter';
+let promptDirty = false;
+
+function togglePromptEditor() {
+  const body = document.getElementById('prompt-body');
+  const btn = document.getElementById('prompt-toggle-btn');
+  const collapsed = body.classList.toggle('collapsed');
+  btn.textContent = collapsed ? '▼' : '▲';
+  if (!collapsed && !promptDefaults.recruiter) loadPromptData();
+}
+
+async function loadPromptData() {
+  try {
+    const resp = await fetch('/api/prompt', { headers: headers() });
+    const data = await resp.json();
+    promptDefaults.recruiter = data.defaults.recruiter;
+    promptDefaults.sales = data.defaults.sales;
+    savedPrompts = data.saved || {};
+    // Show active prompt badge
+    const badge = document.getElementById('active-prompt-name');
+    if (data.active) {
+      badge.textContent = data.active;
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+    // Rebuild tabs with saved prompts
+    rebuildPromptTabs(data.savedPrompts || [], data.active);
+    // Load the active or default prompt
+    if (data.active && data.customPrompt) {
+      document.getElementById('prompt-editor').value = data.customPrompt;
+      document.getElementById('prompt-name').value = data.active;
+      setActiveTab(data.active);
+    } else {
+      document.getElementById('prompt-editor').value = promptDefaults.recruiter;
+      setActiveTab('recruiter');
+    }
+  } catch (e) {
+    console.error('Failed to load prompts:', e);
+  }
+}
+
+function rebuildPromptTabs(savedNames, activeName) {
+  const container = document.getElementById('prompt-tabs');
+  let html = `
+    <button class="prompt-tab" data-tab="recruiter" onclick="loadPromptTab('recruiter')">Recruiter (Default)</button>
+    <button class="prompt-tab" data-tab="sales" onclick="loadPromptTab('sales')">Sales (Default)</button>
+  `;
+  for (const name of savedNames) {
+    const isActive = name === activeName;
+    html += `<button class="prompt-tab" data-tab="${escHtml(name)}" onclick="loadSavedPrompt('${escHtml(name)}')">
+      ${escHtml(name)}${isActive ? ' ✓' : ''}
+      <span style="margin-left:4px;cursor:pointer;color:var(--red)" onclick="event.stopPropagation();deletePrompt('${escHtml(name)}')">&times;</span>
+    </button>`;
+  }
+  container.innerHTML = html;
+}
+
+function setActiveTab(tabName) {
+  document.querySelectorAll('.prompt-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tabName);
+  });
+  currentPromptTab = tabName;
+}
+
+function loadPromptTab(tab) {
+  setActiveTab(tab);
+  document.getElementById('prompt-editor').value = promptDefaults[tab] || '';
+  document.getElementById('prompt-name').value = '';
+}
+
+async function loadSavedPrompt(name) {
+  setActiveTab(name);
+  if (savedPrompts[name]) {
+    document.getElementById('prompt-editor').value = savedPrompts[name];
+  } else {
+    // Fetch fresh
+    try {
+      const resp = await fetch('/api/prompt', { headers: headers() });
+      const data = await resp.json();
+      if (data.saved && data.saved[name]) {
+        document.getElementById('prompt-editor').value = data.saved[name];
+        savedPrompts[name] = data.saved[name];
+      }
+    } catch (e) { console.error(e); }
+  }
+  document.getElementById('prompt-name').value = name;
+}
+
+async function savePrompt(activate) {
+  const name = document.getElementById('prompt-name').value.trim();
+  const prompt = document.getElementById('prompt-editor').value;
+  if (!name) {
+    alert('Please enter a prompt name before saving.');
+    document.getElementById('prompt-name').focus();
+    return;
+  }
+  if (!prompt.trim()) {
+    alert('Prompt cannot be empty.');
+    return;
+  }
+  try {
+    const resp = await fetch('/api/prompt', {
+      method: 'PUT',
+      headers: headers(),
+      body: JSON.stringify({ name, prompt, setActive: activate }),
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+    // Flash save status
+    const status = document.getElementById('prompt-status');
+    status.textContent = activate ? '✓ Saved & Activated' : '✓ Saved';
+    status.classList.add('show');
+    setTimeout(() => status.classList.remove('show'), 2000);
+    // Reload tabs
+    await loadPromptData();
+    log(`Prompt "${name}" ${activate ? 'saved & activated' : 'saved'}`, 'success');
+  } catch (e) {
+    alert('Failed to save: ' + e.message);
+  }
+}
+
+async function resetToDefault() {
+  try {
+    await fetch('/api/prompt/activate', {
+      method: 'POST', headers: headers(), body: JSON.stringify({ name: null })
+    });
+    await loadPromptData();
+    document.getElementById('prompt-editor').value = promptDefaults.recruiter;
+    document.getElementById('prompt-name').value = '';
+    setActiveTab('recruiter');
+    const status = document.getElementById('prompt-status');
+    status.textContent = '✓ Reset to default';
+    status.classList.add('show');
+    setTimeout(() => status.classList.remove('show'), 2000);
+    log('Prompt reset to default', 'info');
+  } catch (e) { alert('Failed to reset: ' + e.message); }
+}
+
+async function deletePrompt(name) {
+  if (!confirm(`Delete prompt "${name}"?`)) return;
+  try {
+    await fetch(`/api/prompt/${encodeURIComponent(name)}`, { method: 'DELETE', headers: headers() });
+    await loadPromptData();
+    log(`Prompt "${name}" deleted`, 'info');
+  } catch (e) { alert('Failed to delete: ' + e.message); }
 }
 
 // Init

@@ -574,12 +574,19 @@ function parseRecruiterResponse(content) {
   return { subject, body };
 }
 
+// Module-level variable for custom prompt (set per run)
+let _currentCustomPrompt = null;
+
+function setCustomPrompt(prompt) {
+  _currentCustomPrompt = prompt;
+}
+
 async function generateMessage(candidateInfo) {
   console.log(`[message] Generating message for ${candidateInfo.name}...`);
   broadcast('generating_message', { candidate: candidateInfo.name });
 
   const mode = process.env.OUTREACH_MODE || 'recruiter';
-  const result = await generateOutreachMessage(candidateInfo, mode);
+  const result = await generateOutreachMessage(candidateInfo, mode, _currentCustomPrompt);
 
   // Parse structured response for recruiter mode
   if (mode === 'recruiter') {
@@ -924,7 +931,14 @@ async function runOutreach(options = {}) {
     maxCandidates = parseInt(process.env.MAX_CANDIDATES) || 20,
     rateLimitMin = parseInt(process.env.RATE_LIMIT_MIN) || 20,
     rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX) || 60,
+    customPrompt = null,
   } = options;
+
+  // Set the custom prompt for this run
+  _currentCustomPrompt = customPrompt;
+  if (customPrompt) {
+    console.log('[run] Using custom prompt from dashboard');
+  }
 
   stopRequested = false;
   const runId = store.createRun(projectUrl, runMode, maxCandidates);

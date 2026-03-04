@@ -233,7 +233,7 @@ function formatUserPrompt(profile) {
   return sections.join('\n');
 }
 
-async function generateOutreachMessage(candidateInfo, mode) {
+async function generateOutreachMessage(candidateInfo, mode, customPrompt) {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const outreachMode = mode || OUTREACH_MODE;
 
@@ -242,7 +242,15 @@ async function generateOutreachMessage(candidateInfo, mode) {
   let systemPrompt;
   let userContent;
 
-  if (outreachMode === 'sales') {
+  if (customPrompt) {
+    // Custom prompt from the UI — inject profile data into placeholders
+    systemPrompt = customPrompt
+      .replace('<<<>>>', profileText)
+      .replace('[INSERT PROFILE DATA HERE]', profileText)
+      .replace('{{CANDIDATE_PROFILE_JSON_OR_TEXT}}', profileText)
+      .replace(/\{\{CANDIDATE_PROFILE\}\}/gi, profileText);
+    userContent = profileText;
+  } else if (outreachMode === 'sales') {
     // For sales mode, replace the placeholder in the prompt
     systemPrompt = SALES_PROMPT.replace('[INSERT PROFILE DATA HERE]', profileText);
     userContent = profileText;
@@ -271,4 +279,4 @@ async function generateOutreachMessage(candidateInfo, mode) {
   };
 }
 
-module.exports = { generateOutreachMessage, formatUserPrompt };
+module.exports = { generateOutreachMessage, formatUserPrompt, RECRUITER_PROMPT, SALES_PROMPT };
