@@ -40,14 +40,36 @@ function saveLegacy() {
 
 function createCampaign(userId, data) {
   const ud = loadUser(userId);
+
+  // Build initial prompt library entry if a prompt is provided
+  const promptLibrary = [];
+  if (data.prompt) {
+    promptLibrary.push({
+      version: 1,
+      prompt: data.prompt,
+      score: null,
+      active: true,
+      createdAt: new Date().toISOString(),
+      feedbackCount: 0,
+    });
+  }
+
   const campaign = {
     id: uuidv4(),
     name: data.name || 'Untitled Campaign',
     type: data.type || 'recruiting',
+    // Legacy fields (backward compat)
     context: data.context || '',
     prompt: data.prompt || '',
     promptVersion: 1,
     feedbackHistory: [],
+    // New goal-based fields
+    outcome: data.outcome || '',
+    tone: data.tone || '',
+    constraints: data.constraints || [],
+    promptLibrary: promptLibrary,
+    feedbackDataset: [],
+    // Common fields
     linkedinProjectUrl: data.linkedinProjectUrl || '',
     status: data.status || 'draft',
     createdAt: new Date().toISOString(),
@@ -71,6 +93,14 @@ function updateCampaign(userId, campaignId, updates) {
   const ud = loadUser(userId);
   const c = (ud.campaigns || []).find(c => c.id === campaignId);
   if (!c) return null;
+
+  // Ensure new fields exist on legacy campaigns
+  if (!c.outcome && c.outcome !== '') c.outcome = '';
+  if (!c.tone && c.tone !== '') c.tone = '';
+  if (!c.constraints) c.constraints = [];
+  if (!c.promptLibrary) c.promptLibrary = [];
+  if (!c.feedbackDataset) c.feedbackDataset = [];
+
   Object.assign(c, updates, { updatedAt: new Date().toISOString() });
   saveUser(userId, ud);
   return c;
@@ -148,6 +178,11 @@ function createCandidate(d) {
     subject: null, message: null, tuned_message: null, error: null, screenshot_path: null,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     userId: d.userId || null, campaignId: d.campaignId || null,
+    // New scoring fields
+    score: null,
+    scoreBreakdown: null,
+    replyProbability: null,
+    signals: [],
   };
   legacyData.candidates.push(candidate);
   saveLegacy();

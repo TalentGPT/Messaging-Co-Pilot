@@ -20,7 +20,11 @@ const engine = require('./automationEngine');
 console.log('  engine OK');
 const { startTunnel } = require('./tunnel');
 console.log('  tunnel OK');
-const { RECRUITER_PROMPT, SALES_PROMPT, regenerateWithFeedback, evolvePrompt, formatUserPrompt, generatePromptFromContext } = require('./messageGenerator');
+const {
+  RECRUITER_PROMPT, SALES_PROMPT, regenerateWithFeedback, evolvePrompt,
+  formatUserPrompt, generatePromptFromContext,
+  buildCandidateContext, scoreMessage, generateFromCampaignGoal, evolvePromptFromDataset,
+} = require('./messageGenerator');
 console.log('All modules loaded.');
 
 // ── JWT Secret ──
@@ -66,7 +70,7 @@ function findUserById(id) {
   return loadUsers().users.find(u => u.id === id) || null;
 }
 
-// ── Cookie Storage (legacy compat — now delegated to store per user) ──
+// ── Cookie Storage (legacy compat) ──
 
 function loadLegacyCookies() {
   const COOKIES_FILE = path.join(__dirname, 'cookies.json');
@@ -76,7 +80,6 @@ function loadLegacyCookies() {
   return { active: null, users: {} };
 }
 
-// Load legacy cookies into engine on startup
 const legacyCookies = loadLegacyCookies();
 if (legacyCookies.active && legacyCookies.users[legacyCookies.active]) {
   engine.setSessionCookies(legacyCookies.users[legacyCookies.active]);
@@ -101,7 +104,6 @@ app.use(cors({
 // ── Auth Middleware ──
 
 function authMiddleware(req, res, next) {
-  // Try cookie first, then Authorization header
   let token = null;
   const cookieHeader = req.headers.cookie || '';
   const match = cookieHeader.match(/token=([^;]+)/);
@@ -126,9 +128,8 @@ function authMiddleware(req, res, next) {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-const wsClients = new Map(); // ws -> { userId }
+const wsClients = new Map();
 wss.on('connection', (ws, req) => {
-  // Auth check for WebSocket via token query param
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const token = url.searchParams.get('token');
   if (token) {
@@ -136,7 +137,6 @@ wss.on('connection', (ws, req) => {
       const decoded = jwt.verify(token, JWT_SECRET);
       wsClients.set(ws, { userId: decoded.id });
     } catch (e) {
-      // Allow unauthenticated WS for backward compat
       wsClients.set(ws, { userId: null });
     }
   } else {
@@ -245,9 +245,25 @@ app.post('/api/campaigns/:id/generate-prompt', authMiddleware, async (req, res) 
   if (!c.context || !c.context.trim()) return res.status(400).json({ error: 'Campaign context is empty' });
   try {
     const prompt = await generatePromptFromContext(c.context, c.type);
+    const newVersion = (c.promptVersion || 0) + 1;
+
+    // Add to prompt library
+    const promptLibrary = c.promptLibrary || [];
+    // Deactivate all existing
+    for (const entry of promptLibrary) entry.active = false;
+    promptLibrary.push({
+      version: newVersion,
+      prompt: prompt,
+      score: null,
+      active: true,
+      createdAt: new Date().toISOString(),
+      feedbackCount: 0,
+    });
+
     const updated = store.updateCampaign(req.user.id, req.params.id, {
       prompt,
-      promptVersion: (c.promptVersion || 0) + 1,
+      promptVersion: newVersion,
+      promptLibrary,
     });
     res.json({ prompt, promptVersion: updated.promptVersion });
   } catch (e) {
@@ -255,6 +271,8 @@ app.post('/api/campaigns/:id/generate-prompt', authMiddleware, async (req, res) 
     res.status(500).json({ error: e.message });
   }
 });
+
+// ── Campaign Run (modified: auto-score, auto-regenerate if score < 70) ──
 
 app.post('/api/campaigns/:id/run', authMiddleware, async (req, res) => {
   const status = engine.getStatus();
@@ -280,13 +298,321 @@ app.post('/api/campaigns/:id/run', authMiddleware, async (req, res) => {
     campaignId: campaign.id,
   };
 
+  // Wrap the engine run to add scoring
+  const originalBroadcast = engine._broadcastFn || broadcast;
+  const userId = req.user.id;
+  const campaignId = campaign.id;
+
+  // Hook into message_generated events to auto-score
+  const scoringBroadcast = async (data) => {
+    if (data.event === 'message_generated' && data.candidateId) {
+      try {
+        const candidate = store.getCandidate(data.candidateId);
+        if (candidate) {
+          const cam = store.getCampaign(userId, campaignId);
+          const profileData = candidate.profile_data || { name: candidate.name, headline: candidate.headline };
+          const candidateCtx = buildCandidateContext(profileData);
+          const goalText = (cam && cam.outcome) ? cam.outcome : (cam && cam.context ? cam.context.substring(0, 200) : 'LinkedIn outreach');
+
+          let message = candidate.tuned_message || candidate.message || data.message || '';
+          let scoreResult = await scoreMessage(message, candidateCtx, goalText);
+          let attempts = 0;
+
+          // Auto-regenerate if score < 70 (up to 2 times)
+          while (scoreResult.score < 70 && attempts < 2) {
+            attempts++;
+            console.log(`[auto-score] Score ${scoreResult.score} < 70 for ${candidate.name}, regenerating (attempt ${attempts})...`);
+            broadcast({ event: 'status', message: `Score ${scoreResult.score}/100 too low for ${candidate.name}, regenerating...` });
+
+            try {
+              let newMessage;
+              if (cam && cam.outcome) {
+                newMessage = await generateFromCampaignGoal(candidateCtx, cam);
+              } else {
+                const prompt = (cam && cam.prompt) || RECRUITER_PROMPT;
+                newMessage = await regenerateWithFeedback(profileData, prompt, message, `Score too low (${scoreResult.score}/100). Improve personalization and clarity.`, cam ? cam.type : 'recruiter');
+              }
+              message = newMessage;
+              scoreResult = await scoreMessage(message, candidateCtx, goalText);
+            } catch (regenErr) {
+              console.error(`[auto-score] Regeneration failed:`, regenErr.message);
+              break;
+            }
+          }
+
+          // Update candidate with score
+          store.updateCandidate(data.candidateId, {
+            message: message,
+            tuned_message: message,
+            score: scoreResult.score,
+            scoreBreakdown: scoreResult.breakdown,
+            replyProbability: scoreResult.replyProbability,
+            signals: scoreResult.signals,
+          });
+
+          // Add score data to the broadcast
+          data.message = message;
+          data.score = scoreResult.score;
+          data.replyProbability = scoreResult.replyProbability;
+          data.signals = scoreResult.signals;
+          data.scoreBreakdown = scoreResult.breakdown;
+        }
+      } catch (scoreErr) {
+        console.error('[auto-score] Scoring failed:', scoreErr.message);
+      }
+    }
+    originalBroadcast(data);
+  };
+
+  engine.setBroadcast(scoringBroadcast);
+
   engine.runOutreach(options).catch(err => {
     console.error('[server] Run error:', err.message);
+  }).finally(() => {
+    // Restore original broadcast
+    engine.setBroadcast(broadcast);
   });
 
   store.updateCampaign(req.user.id, req.params.id, { status: 'active' });
   res.json({ status: 'started', ...options });
 });
+
+// ── Candidate Improve (👎 flow) ──
+
+app.post('/api/candidates/:id/improve', authMiddleware, async (req, res) => {
+  const { feedbackType, customFeedback } = req.body;
+  if (!feedbackType) return res.status(400).json({ error: 'feedbackType is required' });
+
+  const candidate = store.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
+
+  const userId = candidate.userId || req.user.id;
+  const campaignId = candidate.campaignId;
+  let campaign = null;
+  if (campaignId) {
+    campaign = store.getCampaign(userId, campaignId);
+  }
+
+  // Build feedback text from type
+  const feedbackMap = {
+    'too_long': 'The message is too long. Make it shorter and more concise.',
+    'not_personalized': 'The message is not personalized enough. Reference more specific details from the candidate profile.',
+    'too_salesy': 'The message sounds too salesy. Make it more conversational and peer-to-peer.',
+    'wrong_tone': 'The tone is wrong. Adjust to be more appropriate for this type of outreach.',
+    'missed_profile_signal': 'The message missed important signals from the profile. Look deeper at their experience and achievements.',
+    'custom': customFeedback || 'Please improve the message.',
+  };
+  const feedbackText = feedbackMap[feedbackType] || feedbackMap['custom'];
+
+  try {
+    // Store in campaign's feedbackDataset
+    const profileData = candidate.profile_data || { name: candidate.name, headline: candidate.headline };
+    const candidateCtx = buildCandidateContext(profileData);
+
+    if (campaign) {
+      const feedbackDataset = campaign.feedbackDataset || [];
+      feedbackDataset.push({
+        message: candidate.tuned_message || candidate.message || '',
+        candidateContext: { name: candidateCtx.name, title: candidateCtx.title, company: candidateCtx.company },
+        promptUsed: campaign.prompt || '',
+        feedback: feedbackType,
+        correction: customFeedback || '',
+        timestamp: new Date().toISOString(),
+      });
+
+      const updates = { feedbackDataset };
+
+      // Auto-evolve prompt every 5 feedback entries
+      if (feedbackDataset.length > 0 && feedbackDataset.length % 5 === 0) {
+        console.log(`[improve] Feedback count ${feedbackDataset.length} — auto-evolving prompt...`);
+        const currentPrompt = campaign.prompt || RECRUITER_PROMPT;
+        const evolvedPrompt = await evolvePromptFromDataset(currentPrompt, feedbackDataset);
+        const newVersion = (campaign.promptVersion || 1) + 1;
+
+        const promptLibrary = campaign.promptLibrary || [];
+        for (const entry of promptLibrary) entry.active = false;
+        promptLibrary.push({
+          version: newVersion,
+          prompt: evolvedPrompt,
+          score: null,
+          active: true,
+          createdAt: new Date().toISOString(),
+          feedbackCount: feedbackDataset.length,
+        });
+
+        updates.prompt = evolvedPrompt;
+        updates.promptVersion = newVersion;
+        updates.promptLibrary = promptLibrary;
+
+        broadcast({ event: 'prompt_evolved', campaignId, promptVersion: newVersion });
+      }
+
+      store.updateCampaign(userId, campaignId, updates);
+    }
+
+    // Regenerate the message
+    const originalMessage = candidate.tuned_message || candidate.message || '';
+    let currentPrompt;
+    if (campaign && campaign.outcome) {
+      // Use goal-based generation
+      const newMessage = await generateFromCampaignGoal(candidateCtx, campaign);
+
+      // Score the new message
+      const goalText = campaign.outcome || '';
+      const scoreResult = await scoreMessage(newMessage, candidateCtx, goalText);
+
+      store.updateCandidate(req.params.id, {
+        message: newMessage,
+        tuned_message: newMessage,
+        score: scoreResult.score,
+        scoreBreakdown: scoreResult.breakdown,
+        replyProbability: scoreResult.replyProbability,
+        signals: scoreResult.signals,
+      });
+
+      broadcast({
+        event: 'message_regenerated',
+        candidateId: req.params.id,
+        name: candidate.name,
+        message: newMessage,
+        score: scoreResult.score,
+        replyProbability: scoreResult.replyProbability,
+        signals: scoreResult.signals,
+        scoreBreakdown: scoreResult.breakdown,
+      });
+
+      res.json({
+        status: 'improved',
+        candidateId: req.params.id,
+        message: newMessage,
+        score: scoreResult.score,
+        replyProbability: scoreResult.replyProbability,
+        signals: scoreResult.signals,
+        scoreBreakdown: scoreResult.breakdown,
+      });
+    } else {
+      // Legacy: use prompt-based regeneration
+      currentPrompt = (campaign && campaign.prompt) || (campaign && campaign.type === 'sales' ? SALES_PROMPT : RECRUITER_PROMPT);
+      const newMessage = await regenerateWithFeedback(profileData, currentPrompt, originalMessage, feedbackText, campaign ? campaign.type : 'recruiter');
+
+      // Score
+      const goalText = (campaign && campaign.context) ? campaign.context.substring(0, 200) : 'LinkedIn outreach';
+      let scoreResult = { score: 75, breakdown: {}, replyProbability: 50, signals: ['Score unavailable'] };
+      try {
+        scoreResult = await scoreMessage(newMessage, candidateCtx, goalText);
+      } catch (e) { /* use defaults */ }
+
+      store.updateCandidate(req.params.id, {
+        message: newMessage,
+        tuned_message: newMessage,
+        score: scoreResult.score,
+        scoreBreakdown: scoreResult.breakdown,
+        replyProbability: scoreResult.replyProbability,
+        signals: scoreResult.signals,
+      });
+
+      broadcast({
+        event: 'message_regenerated',
+        candidateId: req.params.id,
+        name: candidate.name,
+        message: newMessage,
+        score: scoreResult.score,
+        replyProbability: scoreResult.replyProbability,
+        signals: scoreResult.signals,
+      });
+
+      res.json({
+        status: 'improved',
+        candidateId: req.params.id,
+        message: newMessage,
+        score: scoreResult.score,
+        replyProbability: scoreResult.replyProbability,
+        signals: scoreResult.signals,
+      });
+    }
+  } catch (err) {
+    console.error('[improve] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Candidate Approve (👍 — also logs positive signal) ──
+
+app.post('/api/candidates/:id/approve', authMiddleware, async (req, res) => {
+  const candidate = store.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
+
+  const userId = candidate.userId || req.user.id;
+  const campaignId = candidate.campaignId;
+
+  // Log positive signal in feedbackDataset
+  if (campaignId) {
+    const campaign = store.getCampaign(userId, campaignId);
+    if (campaign) {
+      const feedbackDataset = campaign.feedbackDataset || [];
+      const profileData = candidate.profile_data || { name: candidate.name, headline: candidate.headline };
+      const candidateCtx = buildCandidateContext(profileData);
+      feedbackDataset.push({
+        message: candidate.tuned_message || candidate.message || '',
+        candidateContext: { name: candidateCtx.name, title: candidateCtx.title, company: candidateCtx.company },
+        promptUsed: campaign.prompt || '',
+        feedback: 'approved',
+        correction: '',
+        timestamp: new Date().toISOString(),
+      });
+      store.updateCampaign(userId, campaignId, { feedbackDataset });
+    }
+  }
+
+  // Delegate to engine for actual sending
+  try {
+    const result = await engine.approveCandidate(req.params.id);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── Prompt Versions ──
+
+app.get('/api/campaigns/:id/prompt-versions', authMiddleware, (req, res) => {
+  const campaign = store.getCampaign(req.user.id, req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+  res.json(campaign.promptLibrary || []);
+});
+
+// ── Campaign Analytics ──
+
+app.get('/api/campaigns/:id/analytics', authMiddleware, (req, res) => {
+  const campaign = store.getCampaign(req.user.id, req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+  const candidates = store.getCandidatesByCampaign(req.user.id, req.params.id);
+  const totalGenerated = candidates.length;
+  const scored = candidates.filter(c => c.score != null);
+  const avgScore = scored.length > 0 ? Math.round(scored.reduce((s, c) => s + c.score, 0) / scored.length) : null;
+  const approved = candidates.filter(c => c.status === 'sent').length;
+  const approvalRate = totalGenerated > 0 ? Math.round((approved / totalGenerated) * 100) : 0;
+
+  // Feedback breakdown
+  const feedbackDataset = campaign.feedbackDataset || [];
+  const feedbackBreakdown = {};
+  for (const entry of feedbackDataset) {
+    const type = entry.feedback || 'unknown';
+    feedbackBreakdown[type] = (feedbackBreakdown[type] || 0) + 1;
+  }
+
+  res.json({
+    totalGenerated,
+    avgScore,
+    approvalRate,
+    feedbackBreakdown,
+    promptVersions: (campaign.promptLibrary || []).length,
+    totalFeedback: feedbackDataset.length,
+  });
+});
+
+// ── Legacy Campaign Feedback (kept for backward compat) ──
 
 app.post('/api/campaigns/:id/feedback', authMiddleware, async (req, res) => {
   const { feedback } = req.body;
@@ -296,24 +622,35 @@ app.post('/api/campaigns/:id/feedback', authMiddleware, async (req, res) => {
   if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
   try {
-    // Store feedback
     const feedbackHistory = campaign.feedbackHistory || [];
     feedbackHistory.push({ feedback, timestamp: new Date().toISOString() });
 
-    // Evolve prompt
     const evolvedPrompt = await evolvePrompt(campaign.prompt, feedbackHistory.map(f => ({
       feedback: f.feedback,
       candidateName: 'all',
     })));
 
     const newVersion = (campaign.promptVersion || 1) + 1;
+
+    // Update prompt library
+    const promptLibrary = campaign.promptLibrary || [];
+    for (const entry of promptLibrary) entry.active = false;
+    promptLibrary.push({
+      version: newVersion,
+      prompt: evolvedPrompt,
+      score: null,
+      active: true,
+      createdAt: new Date().toISOString(),
+      feedbackCount: feedbackHistory.length,
+    });
+
     store.updateCampaign(req.user.id, req.params.id, {
       prompt: evolvedPrompt,
       promptVersion: newVersion,
       feedbackHistory,
+      promptLibrary,
     });
 
-    // Regenerate all candidate messages for this campaign
     const candidates = store.getCandidatesByCampaign(req.user.id, req.params.id);
     const regenerated = [];
     for (const cand of candidates) {
@@ -378,6 +715,26 @@ app.post('/api/stop', authMiddleware, (req, res) => {
 
 app.post('/api/approve/:id', authMiddleware, async (req, res) => {
   try {
+    // Also log as positive signal if candidate has a campaign
+    const candidate = store.getCandidate(req.params.id);
+    if (candidate && candidate.campaignId && candidate.userId) {
+      const campaign = store.getCampaign(candidate.userId, candidate.campaignId);
+      if (campaign) {
+        const feedbackDataset = campaign.feedbackDataset || [];
+        const profileData = candidate.profile_data || { name: candidate.name, headline: candidate.headline };
+        const candidateCtx = buildCandidateContext(profileData);
+        feedbackDataset.push({
+          message: candidate.tuned_message || candidate.message || '',
+          candidateContext: { name: candidateCtx.name, title: candidateCtx.title, company: candidateCtx.company },
+          promptUsed: campaign.prompt || '',
+          feedback: 'approved',
+          correction: '',
+          timestamp: new Date().toISOString(),
+        });
+        store.updateCampaign(candidate.userId, candidate.campaignId, { feedbackDataset });
+      }
+    }
+
     const result = await engine.approveCandidate(req.params.id);
     res.json(result);
   } catch (err) {
@@ -406,7 +763,7 @@ app.get('/api/pending', authMiddleware, (req, res) => {
   res.json(store.getPendingCandidates());
 });
 
-// ── Regenerate with Feedback (per candidate) ──
+// ── Regenerate with Feedback (per candidate - legacy) ──
 
 app.post('/api/regenerate/:id', authMiddleware, async (req, res) => {
   const { feedback } = req.body;
@@ -420,7 +777,6 @@ app.post('/api/regenerate/:id', authMiddleware, async (req, res) => {
     const mode = process.env.OUTREACH_MODE || 'recruiter';
     let currentPrompt = mode === 'sales' ? SALES_PROMPT : RECRUITER_PROMPT;
 
-    // If candidate belongs to a campaign, use that prompt
     if (candidate.campaignId && candidate.userId) {
       const campaign = store.getCampaign(candidate.userId, candidate.campaignId);
       if (campaign && campaign.prompt) currentPrompt = campaign.prompt;
@@ -495,7 +851,7 @@ app.get('/health', (req, res) => res.json({
   openai_key_set: !!process.env.OPENAI_API_KEY,
 }));
 
-// ── Login page route (serve index.html for all non-API routes) ──
+// ── Serve index.html for all non-API routes ──
 app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -508,7 +864,7 @@ app.get('/', (req, res) => {
 server.listen(PORT, async () => {
   console.log('========================================');
   console.log(' LinkedIn Outreach Automation');
-  console.log(' Campaign-Based Multi-Tenant Platform');
+  console.log(' Messaging Co-Pilot');
   console.log('========================================');
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Default login: admin / admin123`);
