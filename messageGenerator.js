@@ -388,4 +388,48 @@ Return the improved prompt with the feedback incorporated as permanent improveme
   return response.choices[0]?.message?.content || currentPrompt;
 }
 
-module.exports = { generateOutreachMessage, regenerateWithFeedback, evolvePrompt, formatUserPrompt, RECRUITER_PROMPT, SALES_PROMPT };
+// Generate an outreach prompt from campaign context and type
+async function generatePromptFromContext(context, campaignType) {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const metaPrompt = campaignType === 'sales'
+    ? `You are an expert prompt engineer specializing in LinkedIn sales outreach.
+Given the following context about a product/service and target persona, generate an optimized LinkedIn outreach prompt.
+The prompt should:
+- Be a complete system prompt for an AI to generate personalized LinkedIn messages
+- Include the specific product/service details, value props, and target persona from the context
+- Use {{CANDIDATE_PROFILE}} as a placeholder where the prospect's LinkedIn profile data will be inserted
+- Instruct the AI to write short (3-5 sentences), casual, consultative messages
+- Include guidelines about tone (human, warm, not salesy), personalization, and soft CTAs
+- Reference specific pain points and differentiators from the context
+- End messages without sign-offs (LinkedIn shows sender name)
+
+Return ONLY the prompt text, no explanations.`
+    : `You are an expert prompt engineer specializing in LinkedIn recruiting outreach.
+Given the following context about a role/opportunity, generate an optimized LinkedIn InMail outreach prompt.
+The prompt should:
+- Be a complete system prompt for an AI to generate personalized LinkedIn InMail messages
+- Include the specific role details, requirements, company value prop, and compensation highlights from the context
+- Use {{CANDIDATE_PROFILE}} as a placeholder where the candidate's LinkedIn profile data will be inserted
+- Instruct the AI to write compelling, peer-to-peer style messages (not recruiter-speak)
+- Include output format: A) SUBJECT LINE OPTION 1, B) SUBJECT LINE OPTION 2, C) INMAIL BODY (≤ 650 chars)
+- Include guidelines about tone (direct, operator-to-operator, no buzzwords, no emojis)
+- Reference specific opportunity details from the context
+- End messages without sign-offs (LinkedIn shows sender name)
+
+Return ONLY the prompt text, no explanations.`;
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    temperature: 0.5,
+    max_tokens: 2000,
+    messages: [
+      { role: 'system', content: metaPrompt },
+      { role: 'user', content: `Here is the campaign context:\n\n${context}` },
+    ],
+  });
+
+  return response.choices[0]?.message?.content || '';
+}
+
+module.exports = { generateOutreachMessage, regenerateWithFeedback, evolvePrompt, formatUserPrompt, generatePromptFromContext, RECRUITER_PROMPT, SALES_PROMPT };

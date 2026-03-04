@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LinkedIn Recruiter Automation</title>
+<title>LinkedIn Outreach Automation</title>
 <style>
   :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #94a3b8; --accent: #3b82f6; --green: #22c55e; --red: #ef4444; --yellow: #eab308; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -14,32 +14,34 @@
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
   .card h2 { font-size: 16px; margin-bottom: 16px; }
   label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-  input, select { width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; margin-bottom: 12px; }
+  input, select, textarea { width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; margin-bottom: 12px; font-family: inherit; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
   .row { display: flex; gap: 16px; }
   .row > * { flex: 1; }
-  .slider-row { display: flex; gap: 16px; margin-bottom: 12px; }
-  .slider-row > div { flex: 1; }
-  .slider-row input[type=range] { width: 100%; margin-top: 4px; }
-  .slider-val { font-size: 13px; color: var(--accent); }
   button { padding: 12px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
   button:hover { opacity: 0.85; }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-primary { background: var(--accent); color: #fff; width: 100%; }
-  .btn-stop { background: var(--red); color: #fff; width: 100%; }
-  .btn-sm { padding: 6px 14px; font-size: 12px; border-radius: 6px; width: auto; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-stop { background: var(--red); color: #fff; }
+  .btn-sm { padding: 6px 14px; font-size: 12px; border-radius: 6px; }
   .btn-green { background: var(--green); color: #fff; }
   .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--muted); }
-  .status-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  .badge { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .btn-full { width: 100%; }
+  .badge { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; display: inline-block; }
   .badge-green { background: rgba(34,197,94,.15); color: var(--green); }
   .badge-red { background: rgba(239,68,68,.15); color: var(--red); }
   .badge-yellow { background: rgba(234,179,8,.15); color: var(--yellow); }
   .badge-blue { background: rgba(59,130,246,.15); color: var(--accent); }
   .badge-gray { background: rgba(148,163,184,.15); color: var(--muted); }
+  .hidden { display: none; }
   .stats { display: flex; gap: 16px; margin: 12px 0; }
   .stat { text-align: center; }
   .stat .num { font-size: 28px; font-weight: 700; }
   .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+  .status-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .conn-dot.on { background: var(--green); }
+  .conn-dot.off { background: var(--red); }
   .log { max-height: 300px; overflow-y: auto; font-family: 'SF Mono', monospace; font-size: 12px; line-height: 1.6; padding: 12px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border); }
   .log-entry { padding: 2px 0; }
   .log-entry .time { color: var(--muted); }
@@ -50,54 +52,141 @@
   .candidate-card .name { font-weight: 600; }
   .candidate-card .headline { font-size: 13px; color: var(--muted); }
   .candidate-card .msg-preview { font-size: 13px; margin: 8px 0; white-space: pre-wrap; max-height: 120px; overflow-y: auto; background: var(--card); padding: 8px; border-radius: 6px; }
-  .candidate-card .actions { display: flex; gap: 8px; margin-top: 8px; }
-  .hidden { display: none; }
-  .conn-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .conn-dot.on { background: var(--green); }
-  .conn-dot.off { background: var(--red); }
-  .error-banner { background: rgba(239,68,68,.12); border: 1px solid var(--red); color: var(--red); padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
-  /* Prompt Editor */
-  .prompt-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-  .prompt-header h2 { margin: 0; }
-  .prompt-toggle { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px 8px; }
-  .prompt-body { margin-top: 16px; }
-  .prompt-body.collapsed { display: none; }
-  .prompt-tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-  .prompt-tab { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--muted); transition: all .15s; }
-  .prompt-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .prompt-tab:hover { border-color: var(--accent); }
-  textarea.prompt-editor { width: 100%; min-height: 300px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'SF Mono', 'Consolas', monospace; font-size: 13px; line-height: 1.5; resize: vertical; margin-bottom: 12px; }
-  textarea.prompt-editor:focus { outline: none; border-color: var(--accent); }
-  .prompt-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .prompt-name-input { width: 200px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; }
-  .prompt-status { font-size: 12px; color: var(--green); margin-left: 8px; opacity: 0; transition: opacity .3s; }
-  .prompt-status.show { opacity: 1; }
-  .prompt-info { font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
-  .active-prompt-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: rgba(34,197,94,.15); color: var(--green); margin-left: 8px; }
-  /* Cookies */
-  .cookie-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-  .cookie-header h2 { margin: 0; }
-  .cookie-body { margin-top: 16px; }
-  .cookie-body.collapsed { display: none; }
-  textarea.cookie-editor { width: 100%; min-height: 120px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'SF Mono', 'Consolas', monospace; font-size: 12px; line-height: 1.4; resize: vertical; margin-bottom: 12px; }
-  textarea.cookie-editor:focus { outline: none; border-color: var(--accent); }
-  .cookie-status-line { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
-  /* Feedback */
-  .feedback-area { margin-top: 8px; }
-  .feedback-input { width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; resize: vertical; min-height: 40px; font-family: inherit; }
-  .feedback-input:focus { outline: none; border-color: var(--accent); }
-  .feedback-actions { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
+  .feedback-input { width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; resize: vertical; min-height: 40px; }
   .regen-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .version-badge { font-size: 10px; color: var(--muted); background: rgba(148,163,184,.1); padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
+  .slider-row { display: flex; gap: 16px; margin-bottom: 12px; }
+  .slider-row > div { flex: 1; }
+  .slider-row input[type=range] { width: 100%; margin-top: 4px; }
+  .slider-val { font-size: 13px; color: var(--accent); }
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .topbar-user { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 12px; }
+  .topbar-user button { padding: 6px 14px; font-size: 12px; }
+  textarea.prompt-editor { width: 100%; min-height: 200px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'SF Mono', 'Consolas', monospace; font-size: 13px; line-height: 1.5; resize: vertical; margin-bottom: 12px; }
+  textarea.context-editor { width: 100%; min-height: 150px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; line-height: 1.5; resize: vertical; margin-bottom: 12px; }
+  .collapsible-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .collapsible-body { margin-top: 16px; }
+  .collapsible-body.collapsed { display: none; }
+  .toggle-btn { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px 8px; }
+  textarea.cookie-editor { width: 100%; min-height: 120px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'SF Mono', monospace; font-size: 12px; line-height: 1.4; resize: vertical; margin-bottom: 12px; }
+  .campaign-select { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+  .campaign-select select { flex: 1; margin-bottom: 0; }
+  /* Login page */
+  .login-container { max-width: 400px; margin: 100px auto; padding: 24px; }
+  .login-container h1 { text-align: center; margin-bottom: 8px; }
+  .login-container .subtitle { text-align: center; }
+  .login-error { color: var(--red); font-size: 13px; margin-bottom: 12px; text-align: center; }
+  .change-pw-banner { background: rgba(234,179,8,.12); border: 1px solid var(--yellow); color: var(--yellow); padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
 </style>
 </head>
 <body>
-<div class="container">
-  <h1>⚡ LinkedIn Recruiter Automation</h1>
-  <p class="subtitle">Messaging Co-Pilot &middot; Local Runner</p>
 
-  <div id="error-banner" class="error-banner hidden"></div>
+<!-- LOGIN PAGE -->
+<div id="login-page" class="login-container">
+  <h1>⚡ LinkedIn Outreach</h1>
+  <p class="subtitle">Campaign-Based Automation Platform</p>
+  <div class="card" style="margin-top:24px">
+    <h2>Login</h2>
+    <div id="login-error" class="login-error hidden"></div>
+    <label>Username</label>
+    <input id="login-user" type="text" placeholder="Username" autofocus>
+    <label>Password</label>
+    <input id="login-pass" type="password" placeholder="Password">
+    <button class="btn-primary btn-full" onclick="doLogin()">Login</button>
+  </div>
+</div>
+
+<!-- CHANGE PASSWORD -->
+<div id="change-pw-page" class="login-container hidden">
+  <h1>🔑 Change Password</h1>
+  <p class="subtitle">Please set a new password for your account</p>
+  <div class="card" style="margin-top:24px">
+    <div class="change-pw-banner">Your account is using the default password. Please change it now.</div>
+    <label>New Password</label>
+    <input id="new-pass" type="password" placeholder="Enter new password">
+    <label>Confirm Password</label>
+    <input id="confirm-pass" type="password" placeholder="Confirm new password">
+    <div id="pw-error" class="login-error hidden"></div>
+    <button class="btn-primary btn-full" onclick="doChangePassword()">Change Password</button>
+  </div>
+</div>
+
+<!-- MAIN DASHBOARD -->
+<div id="dashboard" class="container hidden">
+  <!-- Top bar -->
+  <div class="topbar">
+    <div>
+      <h1>⚡ LinkedIn Outreach</h1>
+      <p class="subtitle">Campaign-Based Automation Platform</p>
+    </div>
+    <div class="topbar-user">
+      <span id="user-display"></span>
+      <button class="btn-sm btn-outline" onclick="doLogout()">Logout</button>
+    </div>
+  </div>
+
+  <!-- Campaign Selector -->
+  <div class="card">
+    <h2>📋 Campaign</h2>
+    <div class="campaign-select">
+      <select id="campaign-select" onchange="onCampaignChange()">
+        <option value="">— Select a Campaign —</option>
+      </select>
+      <button class="btn-sm btn-primary" onclick="showNewCampaign()">+ New Campaign</button>
+    </div>
+
+    <!-- New/Edit Campaign Panel -->
+    <div id="campaign-form" class="hidden">
+      <input id="campaign-name" placeholder="Campaign name (e.g. Managing Partner - NYC)">
+      <div class="row">
+        <div>
+          <label>Type</label>
+          <select id="campaign-type" onchange="updateContextPlaceholder()">
+            <option value="recruiting">🎯 Recruiting</option>
+            <option value="sales">💼 Sales</option>
+          </select>
+        </div>
+        <div>
+          <label>Status</label>
+          <select id="campaign-status">
+            <option value="draft">Draft</option>
+            <option value="active">Active</option>
+            <option value="completed">Completed</option>
+          </select>
+        </div>
+      </div>
+      <label>Campaign Context</label>
+      <textarea id="campaign-context" class="context-editor" placeholder="Describe the role, requirements, ideal candidate, company value prop, compensation highlights, what makes this opportunity unique..."></textarea>
+      <label>LinkedIn Project URL</label>
+      <input id="campaign-url" placeholder="https://www.linkedin.com/talent/hire/...">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-sm btn-primary" onclick="generatePrompt()">🤖 Generate Prompt</button>
+        <button class="btn-sm btn-outline" onclick="showWriteOwnPrompt()">✍️ Write My Own Prompt</button>
+        <button class="btn-sm btn-green" onclick="saveCampaign()">💾 Save Campaign</button>
+        <button class="btn-sm btn-outline" onclick="cancelCampaign()" style="color:var(--red)">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompt Panel -->
+  <div id="prompt-panel" class="card hidden">
+    <div class="collapsible-header" onclick="toggleSection('prompt-body','prompt-toggle')">
+      <h2>✏️ Prompt <span id="prompt-version-badge" class="version-badge"></span></h2>
+      <button class="toggle-btn" id="prompt-toggle">▲</button>
+    </div>
+    <div class="collapsible-body" id="prompt-body">
+      <details style="margin-bottom:12px">
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px">View Campaign Context</summary>
+        <div id="prompt-context-preview" style="font-size:13px;color:var(--muted);margin-top:8px;padding:8px;background:var(--bg);border-radius:6px;white-space:pre-wrap"></div>
+      </details>
+      <textarea class="prompt-editor" id="prompt-editor" placeholder="Prompt will appear here..."></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-sm btn-primary" onclick="generatePrompt()">🤖 Regenerate Prompt</button>
+        <button class="btn-sm btn-green" onclick="savePromptOnly()">💾 Save Prompt</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Status -->
   <div class="card">
@@ -107,7 +196,7 @@
       <span><span id="ws-dot" class="conn-dot off"></span> <span id="ws-label" style="font-size:12px;color:var(--muted)">Disconnected</span></span>
       <span id="browser-badge" class="badge badge-gray" style="margin-left:auto">Browser: ?</span>
     </div>
-    <div class="stats" id="stats">
+    <div class="stats">
       <div class="stat"><div class="num" id="s-processed">0</div><div class="label">Processed</div></div>
       <div class="stat"><div class="num" id="s-succeeded" style="color:var(--green)">0</div><div class="label">Succeeded</div></div>
       <div class="stat"><div class="num" id="s-failed" style="color:var(--red)">0</div><div class="label">Failed</div></div>
@@ -115,92 +204,86 @@
     </div>
   </div>
 
-  <!-- Session Cookies -->
-  <div class="card" id="cookie-section">
-    <div class="cookie-header" onclick="toggleCookieEditor()">
-      <h2>🔑 LinkedIn Session <span id="cookie-badge" class="badge badge-gray">No session</span></h2>
-      <button class="prompt-toggle" id="cookie-toggle-btn">▼</button>
+  <!-- Configuration -->
+  <div class="card">
+    <div class="collapsible-header" onclick="toggleSection('config-body','config-toggle')">
+      <h2>⚙️ Configuration</h2>
+      <button class="toggle-btn" id="config-toggle">▼</button>
     </div>
-    <div class="cookie-body collapsed" id="cookie-body">
-      <p class="prompt-info">
-        Each user saves their own LinkedIn session cookies. Select the active user before starting a run.<br>
-        <strong>How to get cookies:</strong> Log into LinkedIn in Chrome → F12 → Network tab → click any request → copy the <code>Cookie:</code> header value.
-      </p>
-      <!-- Saved users list -->
-      <div id="cookie-users" style="margin-bottom:12px"></div>
-      <!-- Add / update user -->
-      <div style="border-top:1px solid var(--border); padding-top:12px; margin-top:4px">
-        <label>User Name</label>
-        <input id="cookie-user-name" placeholder="e.g. Joe Hawn" style="width:250px; margin-bottom:8px">
-        <label>Paste Cookies</label>
-        <textarea class="cookie-editor" id="cookie-editor" placeholder="Paste full cookie string here...&#10;&#10;Example: li_at=AQEDAS...; JSESSIONID=ajax:123...; bcookie=..."></textarea>
-        <div class="prompt-actions">
-          <button class="btn-sm btn-green" onclick="saveCookieUser(false)">💾 Save</button>
-          <button class="btn-sm btn-primary" onclick="saveCookieUser(true)" style="background:var(--accent)">💾 Save & Activate</button>
-          <span class="prompt-status" id="cookie-save-status">✓ Saved</span>
+    <div class="collapsible-body collapsed" id="config-body">
+      <div class="row">
+        <div>
+          <label>Max Candidates</label>
+          <input id="max-candidates" type="number" value="2" min="1" max="100">
+        </div>
+        <div>
+          <label>Run Mode</label>
+          <select id="run-mode">
+            <option value="dry_run" selected>Dry Run</option>
+            <option value="manual_review">Manual Review</option>
+            <option value="auto_send">Auto Send</option>
+          </select>
+        </div>
+      </div>
+      <label>Rate Limit (seconds between candidates)</label>
+      <div class="slider-row">
+        <div>
+          <label>Min: <span class="slider-val" id="rate-min-val">10</span>s</label>
+          <input type="range" id="rate-min" min="5" max="120" value="10" oninput="document.getElementById('rate-min-val').textContent=this.value">
+        </div>
+        <div>
+          <label>Max: <span class="slider-val" id="rate-max-val">60</span>s</label>
+          <input type="range" id="rate-max" min="10" max="180" value="60" oninput="document.getElementById('rate-max-val').textContent=this.value">
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Config -->
+  <!-- Run Controls -->
   <div class="card">
-    <h2>Configuration</h2>
-    <label>LinkedIn Recruiter Project URL</label>
-    <input id="project-url" value="https://www.linkedin.com/talent/hire/1419489929/manage/12968975718">
-    <div class="row">
-      <div>
-        <label>Max Candidates</label>
-        <input id="max-candidates" type="number" value="2" min="1" max="100">
-      </div>
-      <div>
-        <label>Run Mode</label>
-        <select id="run-mode">
-          <option value="dry_run" selected>Dry Run</option>
-          <option value="manual_review">Manual Review</option>
-          <option value="auto_send">Auto Send</option>
-        </select>
-      </div>
-    </div>
-    <label>Rate Limit (seconds between candidates)</label>
-    <div class="slider-row">
-      <div>
-        <label>Min: <span class="slider-val" id="rate-min-val">10</span>s</label>
-        <input type="range" id="rate-min" min="5" max="120" value="10">
-      </div>
-      <div>
-        <label>Max: <span class="slider-val" id="rate-max-val">60</span>s</label>
-        <input type="range" id="rate-max" min="10" max="180" value="60">
-      </div>
-    </div>
-    <button id="btn-start" class="btn-primary" onclick="startRun()">▶ Start Run</button>
-    <button id="btn-stop" class="btn-stop hidden" onclick="stopRun()">⏹ Stop Run</button>
+    <button id="btn-start" class="btn-primary btn-full" onclick="startRun()">▶ Start Run</button>
+    <button id="btn-stop" class="btn-stop btn-full hidden" onclick="stopRun()">⏹ Stop Run</button>
   </div>
 
-  <!-- Prompt Editor -->
-  <div class="card" id="prompt-section">
-    <div class="prompt-header" onclick="togglePromptEditor()">
-      <h2>✏️ Prompt Editor <span id="active-prompt-name" class="active-prompt-badge" style="display:none"></span></h2>
-      <button class="prompt-toggle" id="prompt-toggle-btn">▼</button>
+  <!-- Cookie/Session -->
+  <div class="card">
+    <div class="collapsible-header" onclick="toggleSection('cookie-body','cookie-toggle')">
+      <h2>🔑 LinkedIn Session <span id="cookie-badge" class="badge badge-gray">No session</span></h2>
+      <button class="toggle-btn" id="cookie-toggle">▼</button>
     </div>
-    <div class="prompt-body collapsed" id="prompt-body">
-      <p class="prompt-info">
-        Customize the system prompt sent to OpenAI along with each candidate's LinkedIn profile.
-        Use <code>&lt;&lt;&lt;&gt;&gt;&gt;</code> or <code>{{CANDIDATE_PROFILE}}</code> as a placeholder where the profile data will be inserted.
+    <div class="collapsible-body collapsed" id="cookie-body">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+        Each user saves their own LinkedIn session cookies. Select the active user before starting a run.<br>
+        <strong>How to get cookies:</strong> Log into LinkedIn in Chrome → F12 → Network tab → click any request → copy the <code>Cookie:</code> header value.
       </p>
-      <div class="prompt-tabs" id="prompt-tabs">
-        <button class="prompt-tab active" data-tab="recruiter" onclick="loadPromptTab('recruiter')">Recruiter (Default)</button>
-        <button class="prompt-tab" data-tab="sales" onclick="loadPromptTab('sales')">Sales (Default)</button>
-      </div>
-      <textarea class="prompt-editor" id="prompt-editor" placeholder="Enter your custom prompt here..."></textarea>
-      <div class="prompt-actions">
-        <input class="prompt-name-input" id="prompt-name" placeholder="Prompt name (e.g. 'NYC Sales Rep')" value="">
-        <button class="btn-sm btn-green" onclick="savePrompt(false)">💾 Save</button>
-        <button class="btn-sm btn-primary" onclick="savePrompt(true)" style="background:var(--accent)">💾 Save & Activate</button>
-        <button class="btn-sm btn-outline" onclick="resetToDefault()">↩ Reset to Default</button>
-        <span class="prompt-status" id="prompt-status">✓ Saved</span>
+      <div id="cookie-users" style="margin-bottom:12px"></div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+        <label>User Name</label>
+        <input id="cookie-user-name" placeholder="e.g. Joe Hawn" style="width:250px;margin-bottom:8px">
+        <label>Paste Cookies</label>
+        <textarea class="cookie-editor" id="cookie-editor" placeholder="Paste full cookie string here..."></textarea>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn-sm btn-green" onclick="saveCookieUser(false)">💾 Save</button>
+          <button class="btn-sm btn-primary" onclick="saveCookieUser(true)">💾 Save & Activate</button>
+          <span id="cookie-save-status" style="font-size:12px;color:var(--green);opacity:0;transition:opacity .3s"></span>
+        </div>
       </div>
     </div>
+  </div>
+
+  <!-- Candidates Panel -->
+  <div class="card" id="candidates-section">
+    <h2>👥 Candidates</h2>
+    <!-- Campaign-level feedback -->
+    <div id="campaign-feedback" class="hidden" style="margin-bottom:16px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+      <label>Campaign-wide Feedback (evolves prompt & regenerates ALL messages)</label>
+      <textarea class="feedback-input" id="campaign-feedback-text" placeholder="What should be different across all messages? e.g. 'Too formal, make it more casual' or 'Focus more on equity opportunity'"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button class="btn-sm btn-primary" onclick="submitCampaignFeedback()">🔄 Evolve Prompt & Regenerate All</button>
+        <span id="campaign-feedback-status" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+    </div>
+    <div id="candidates-list"><p style="color:var(--muted);font-size:13px">No candidates yet. Select a campaign and start a run.</p></div>
   </div>
 
   <!-- Pending Review -->
@@ -209,13 +292,7 @@
     <div id="pending-list"></div>
   </div>
 
-  <!-- Candidates -->
-  <div class="card" id="candidates-section">
-    <h2>Candidates</h2>
-    <div id="candidates-list"><p style="color:var(--muted);font-size:13px">No candidates yet. Start a run above.</p></div>
-  </div>
-
-  <!-- Log -->
+  <!-- Activity Log -->
   <div class="card">
     <h2>📜 Activity Log</h2>
     <div class="log" id="log"></div>
@@ -223,23 +300,22 @@
 </div>
 
 <script>
-const API_KEY = '';  // Set if you have one; empty = no auth for localhost
-const BASE = '';     // Same origin
-
-// Sliders
-document.getElementById('rate-min').oninput = e => document.getElementById('rate-min-val').textContent = e.target.value;
-document.getElementById('rate-max').oninput = e => document.getElementById('rate-max-val').textContent = e.target.value;
-
-// State
+// ── State ──
+let authToken = localStorage.getItem('token') || '';
+let currentUser = null;
+let campaigns = [];
+let activeCampaignId = null;
 let candidates = {};
 let ws = null;
 let running = false;
 
-function headers() {
-  const h = { 'Content-Type': 'application/json' };
-  if (API_KEY) h['x-api-key'] = API_KEY;
-  return h;
+function h() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  return headers;
 }
+
+function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 function log(msg, cls = '') {
   const el = document.getElementById('log');
@@ -248,11 +324,297 @@ function log(msg, cls = '') {
   el.scrollTop = el.scrollHeight;
 }
 
-function updateStats(data) {
-  if (!data) return;
-  document.getElementById('s-processed').textContent = data.processed || 0;
-  document.getElementById('s-succeeded').textContent = data.succeeded || 0;
-  document.getElementById('s-failed').textContent = data.failed || 0;
+// ── Auth ──
+
+async function checkAuth() {
+  if (!authToken) { showLogin(); return; }
+  try {
+    const resp = await fetch('/api/auth/me', { headers: h() });
+    if (!resp.ok) { showLogin(); return; }
+    currentUser = await resp.json();
+    if (currentUser.mustChangePassword) {
+      showChangePassword();
+    } else {
+      showDashboard();
+    }
+  } catch (e) { showLogin(); }
+}
+
+function showLogin() {
+  document.getElementById('login-page').classList.remove('hidden');
+  document.getElementById('change-pw-page').classList.add('hidden');
+  document.getElementById('dashboard').classList.add('hidden');
+}
+
+function showChangePassword() {
+  document.getElementById('login-page').classList.add('hidden');
+  document.getElementById('change-pw-page').classList.remove('hidden');
+  document.getElementById('dashboard').classList.add('hidden');
+}
+
+function showDashboard() {
+  document.getElementById('login-page').classList.add('hidden');
+  document.getElementById('change-pw-page').classList.add('hidden');
+  document.getElementById('dashboard').classList.remove('hidden');
+  document.getElementById('user-display').textContent = `👤 ${currentUser.username}`;
+  loadCampaigns();
+  loadCookieUsers();
+  pollStatus();
+  connectWs();
+}
+
+async function doLogin() {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const errEl = document.getElementById('login-error');
+  errEl.classList.add('hidden');
+  if (!username || !password) { errEl.textContent = 'Please enter username and password'; errEl.classList.remove('hidden'); return; }
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await resp.json();
+    if (data.error) { errEl.textContent = data.error; errEl.classList.remove('hidden'); return; }
+    authToken = data.token;
+    localStorage.setItem('token', authToken);
+    currentUser = data.user;
+    if (currentUser.mustChangePassword) {
+      showChangePassword();
+    } else {
+      showDashboard();
+    }
+  } catch (e) { errEl.textContent = 'Login failed: ' + e.message; errEl.classList.remove('hidden'); }
+}
+
+async function doChangePassword() {
+  const pw = document.getElementById('new-pass').value;
+  const confirm = document.getElementById('confirm-pass').value;
+  const errEl = document.getElementById('pw-error');
+  errEl.classList.add('hidden');
+  if (!pw || pw.length < 4) { errEl.textContent = 'Password must be at least 4 characters'; errEl.classList.remove('hidden'); return; }
+  if (pw !== confirm) { errEl.textContent = 'Passwords do not match'; errEl.classList.remove('hidden'); return; }
+  try {
+    const resp = await fetch('/api/auth/change-password', { method: 'POST', headers: h(), body: JSON.stringify({ password: pw }) });
+    const data = await resp.json();
+    if (data.error) { errEl.textContent = data.error; errEl.classList.remove('hidden'); return; }
+    currentUser.mustChangePassword = false;
+    showDashboard();
+  } catch (e) { errEl.textContent = 'Failed: ' + e.message; errEl.classList.remove('hidden'); }
+}
+
+function doLogout() {
+  authToken = '';
+  localStorage.removeItem('token');
+  currentUser = null;
+  if (ws) ws.close();
+  showLogin();
+}
+
+// Enter key on login
+document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('login-user').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-pass').focus(); });
+
+// ── Campaigns ──
+
+async function loadCampaigns() {
+  try {
+    const resp = await fetch('/api/campaigns', { headers: h() });
+    campaigns = await resp.json();
+    const sel = document.getElementById('campaign-select');
+    const prev = activeCampaignId;
+    sel.innerHTML = '<option value="">— Select a Campaign —</option>';
+    for (const c of campaigns) {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = `${c.name} (${c.type}) — ${c.status}`;
+      sel.appendChild(opt);
+    }
+    if (prev && campaigns.find(c => c.id === prev)) {
+      sel.value = prev;
+      onCampaignChange();
+    }
+  } catch (e) { console.error('Failed to load campaigns:', e); }
+}
+
+function onCampaignChange() {
+  const id = document.getElementById('campaign-select').value;
+  activeCampaignId = id || null;
+  document.getElementById('campaign-form').classList.add('hidden');
+  if (!id) {
+    document.getElementById('prompt-panel').classList.add('hidden');
+    document.getElementById('campaign-feedback').classList.add('hidden');
+    return;
+  }
+  const c = campaigns.find(x => x.id === id);
+  if (!c) return;
+  // Populate form for editing
+  document.getElementById('campaign-name').value = c.name;
+  document.getElementById('campaign-type').value = c.type;
+  document.getElementById('campaign-status').value = c.status;
+  document.getElementById('campaign-context').value = c.context || '';
+  document.getElementById('campaign-url').value = c.linkedinProjectUrl || '';
+  document.getElementById('campaign-form').classList.remove('hidden');
+  // Show prompt panel
+  if (c.prompt) {
+    document.getElementById('prompt-panel').classList.remove('hidden');
+    document.getElementById('prompt-editor').value = c.prompt;
+    document.getElementById('prompt-version-badge').textContent = `v${c.promptVersion || 1}`;
+    document.getElementById('prompt-context-preview').textContent = c.context || '';
+    document.getElementById('campaign-feedback').classList.remove('hidden');
+  } else {
+    document.getElementById('prompt-panel').classList.add('hidden');
+    document.getElementById('campaign-feedback').classList.add('hidden');
+  }
+  updateContextPlaceholder();
+}
+
+function showNewCampaign() {
+  document.getElementById('campaign-select').value = '';
+  activeCampaignId = null;
+  document.getElementById('campaign-name').value = '';
+  document.getElementById('campaign-type').value = 'recruiting';
+  document.getElementById('campaign-status').value = 'draft';
+  document.getElementById('campaign-context').value = '';
+  document.getElementById('campaign-url').value = '';
+  document.getElementById('campaign-form').classList.remove('hidden');
+  document.getElementById('prompt-panel').classList.add('hidden');
+  document.getElementById('campaign-feedback').classList.add('hidden');
+  document.getElementById('campaign-name').focus();
+  updateContextPlaceholder();
+}
+
+function cancelCampaign() {
+  document.getElementById('campaign-form').classList.add('hidden');
+  if (!activeCampaignId) {
+    document.getElementById('prompt-panel').classList.add('hidden');
+  }
+}
+
+function updateContextPlaceholder() {
+  const type = document.getElementById('campaign-type').value;
+  const el = document.getElementById('campaign-context');
+  el.placeholder = type === 'sales'
+    ? 'Describe your product/service, target persona, pain points you solve, key differentiators, case studies...'
+    : 'Describe the role, requirements, ideal candidate, company value prop, compensation highlights, what makes this opportunity unique...';
+}
+
+async function saveCampaign() {
+  const data = {
+    name: document.getElementById('campaign-name').value.trim(),
+    type: document.getElementById('campaign-type').value,
+    status: document.getElementById('campaign-status').value,
+    context: document.getElementById('campaign-context').value,
+    linkedinProjectUrl: document.getElementById('campaign-url').value.trim(),
+  };
+  if (!data.name) { alert('Please enter a campaign name'); return; }
+  try {
+    let resp;
+    if (activeCampaignId) {
+      resp = await fetch(`/api/campaigns/${activeCampaignId}`, { method: 'PUT', headers: h(), body: JSON.stringify(data) });
+    } else {
+      resp = await fetch('/api/campaigns', { method: 'POST', headers: h(), body: JSON.stringify(data) });
+    }
+    const campaign = await resp.json();
+    if (campaign.error) { alert('Error: ' + campaign.error); return; }
+    activeCampaignId = campaign.id;
+    await loadCampaigns();
+    document.getElementById('campaign-select').value = campaign.id;
+    onCampaignChange();
+    log(`Campaign "${data.name}" saved`, 'success');
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function generatePrompt() {
+  if (!activeCampaignId) { alert('Please save the campaign first'); return; }
+  const context = document.getElementById('campaign-context').value.trim();
+  if (!context) { alert('Please enter campaign context before generating a prompt'); return; }
+  // Save context first
+  await saveCampaign();
+  log('Generating prompt from context...', 'info');
+  try {
+    const resp = await fetch(`/api/campaigns/${activeCampaignId}/generate-prompt`, { method: 'POST', headers: h() });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+    document.getElementById('prompt-editor').value = data.prompt;
+    document.getElementById('prompt-version-badge').textContent = `v${data.promptVersion}`;
+    document.getElementById('prompt-panel').classList.remove('hidden');
+    document.getElementById('prompt-context-preview').textContent = context;
+    document.getElementById('campaign-feedback').classList.remove('hidden');
+    log(`Prompt generated (v${data.promptVersion})`, 'success');
+    // Reload campaign
+    await loadCampaigns();
+    document.getElementById('campaign-select').value = activeCampaignId;
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+function showWriteOwnPrompt() {
+  document.getElementById('prompt-panel').classList.remove('hidden');
+  document.getElementById('prompt-editor').value = '';
+  document.getElementById('prompt-editor').placeholder = 'Write your custom outreach prompt here...\n\nUse {{CANDIDATE_PROFILE}} as a placeholder where the candidate\'s LinkedIn profile data will be inserted.';
+  document.getElementById('prompt-editor').focus();
+}
+
+async function savePromptOnly() {
+  if (!activeCampaignId) return;
+  const prompt = document.getElementById('prompt-editor').value;
+  try {
+    const resp = await fetch(`/api/campaigns/${activeCampaignId}`, {
+      method: 'PUT', headers: h(), body: JSON.stringify({ prompt })
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+    log('Prompt saved', 'success');
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+// ── Campaign Feedback ──
+
+async function submitCampaignFeedback() {
+  if (!activeCampaignId) return;
+  const feedback = document.getElementById('campaign-feedback-text').value.trim();
+  if (!feedback) { alert('Please enter feedback'); return; }
+  const statusEl = document.getElementById('campaign-feedback-status');
+  statusEl.innerHTML = '<span class="regen-spinner"></span> Evolving prompt & regenerating...';
+  try {
+    const resp = await fetch(`/api/campaigns/${activeCampaignId}/feedback`, {
+      method: 'POST', headers: h(), body: JSON.stringify({ feedback })
+    });
+    const data = await resp.json();
+    if (data.error) { statusEl.textContent = 'Error: ' + data.error; return; }
+    statusEl.textContent = `✓ Prompt evolved to v${data.promptVersion}, ${data.regeneratedCount} messages regenerated`;
+    document.getElementById('prompt-editor').value = data.prompt;
+    document.getElementById('prompt-version-badge').textContent = `v${data.promptVersion}`;
+    document.getElementById('campaign-feedback-text').value = '';
+    log(`Prompt evolved to v${data.promptVersion}, ${data.regeneratedCount} messages regenerated`, 'success');
+    await loadCampaigns();
+    document.getElementById('campaign-select').value = activeCampaignId;
+  } catch (e) { statusEl.textContent = 'Error: ' + e.message; }
+}
+
+// ── Run Controls ──
+
+async function startRun() {
+  if (!activeCampaignId) { alert('Please select a campaign first'); return; }
+  try {
+    const body = {
+      run_mode: document.getElementById('run-mode').value,
+      max_candidates: parseInt(document.getElementById('max-candidates').value),
+      rate_limit_min: parseInt(document.getElementById('rate-min').value),
+      rate_limit_max: parseInt(document.getElementById('rate-max').value),
+    };
+    const resp = await fetch(`/api/campaigns/${activeCampaignId}/run`, { method: 'POST', headers: h(), body: JSON.stringify(body) });
+    const data = await resp.json();
+    if (data.error) { log('Error: ' + data.error, 'error'); return; }
+    log('Run started: ' + data.runMode, 'info');
+    setRunning(true);
+    candidates = {};
+    refreshCandidates();
+  } catch (e) { log('Failed: ' + e.message, 'error'); }
+}
+
+async function stopRun() {
+  try { await fetch('/api/stop', { method: 'POST', headers: h() }); log('Stop requested', 'info'); } catch (e) { log('Failed: ' + e.message, 'error'); }
 }
 
 function setRunning(r) {
@@ -270,6 +632,27 @@ function setBrowser(connected) {
   b.className = connected ? 'badge badge-green' : 'badge badge-red';
 }
 
+function updateStats(data) {
+  if (!data) return;
+  document.getElementById('s-processed').textContent = data.processed || 0;
+  document.getElementById('s-succeeded').textContent = data.succeeded || 0;
+  document.getElementById('s-failed').textContent = data.failed || 0;
+}
+
+async function pollStatus() {
+  try {
+    const resp = await fetch('/api/status', { headers: h() });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    setRunning(data.running);
+    setBrowser(data.browserConnected);
+    if (data.currentRun) updateStats(data.currentRun);
+  } catch {}
+}
+setInterval(pollStatus, 5000);
+
+// ── Candidates ──
+
 function renderCandidate(c) {
   const statusBadge = {
     dry_run: '<span class="badge badge-blue">Dry Run</span>',
@@ -277,248 +660,76 @@ function renderCandidate(c) {
     sent: '<span class="badge badge-green">Sent</span>',
     error: '<span class="badge badge-red">Error</span>',
     skipped: '<span class="badge badge-gray">Skipped</span>',
-    regenerating: '<span class="badge badge-blue"><span class="regen-spinner"></span> Regenerating</span>',
+    regenerating: '<span class="badge badge-blue"><span class="regen-spinner"></span></span>',
   }[c.status] || `<span class="badge badge-gray">${c.status}</span>`;
-
   const msg = c.tuned_message || c.message || '';
-  const msgPreview = msg ? `<div class="msg-preview" id="msg-${c.id}">${escHtml(msg)}</div>` : '';
-  const subj = c.subject ? `<div style="font-size:12px;color:var(--accent)" id="subj-${c.id}">Subject: ${escHtml(c.subject)}</div>` : '';
-  const err = c.error ? `<div style="font-size:12px;color:var(--red);margin-top:4px">Error: ${escHtml(c.error)}</div>` : '';
+  const msgHtml = msg ? `<div class="msg-preview">${escHtml(msg)}</div>` : '';
+  const subj = c.subject ? `<div style="font-size:12px;color:var(--accent)">Subject: ${escHtml(c.subject)}</div>` : '';
   const regenCount = c.regenCount ? `<span class="version-badge">v${c.regenCount + 1}</span>` : '';
-
-  // Show feedback/regenerate for any candidate with a message (dry_run, pending_review, etc.) but not sent
   const canFeedback = msg && c.status !== 'sent' && c.status !== 'skipped' && c.status !== 'regenerating';
-  const feedbackSection = canFeedback ? `
-    <div class="feedback-area" id="fb-area-${c.id}">
-      <div class="feedback-actions">
-        <button class="btn-sm btn-green" onclick="approve('${c.id}')">✅ Approve</button>
-        <button class="btn-sm btn-outline" onclick="showFeedbackInput('${c.id}')">✏️ Give Feedback</button>
-        <button class="btn-sm btn-outline" onclick="skip('${c.id}')">Skip</button>
+  const feedbackHtml = canFeedback ? `
+    <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+      <button class="btn-sm btn-green" onclick="approveCandidate('${c.id}')" title="Approve">👍</button>
+      <button class="btn-sm btn-outline" onclick="showFeedback('${c.id}')" title="Give feedback">👎</button>
+      <button class="btn-sm btn-outline" onclick="skipCandidate('${c.id}')">Skip</button>
+    </div>
+    <div id="fb-${c.id}" class="hidden" style="margin-top:8px">
+      <textarea class="feedback-input" id="fbt-${c.id}" placeholder="What should be different?"></textarea>
+      <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+        <button class="btn-sm btn-primary" onclick="regenCandidate('${c.id}')">🔄 Regenerate</button>
+        <button class="btn-sm btn-outline" onclick="document.getElementById('fb-${c.id}').classList.add('hidden')">Cancel</button>
+        <span id="fbs-${c.id}" style="font-size:12px;color:var(--muted)"></span>
       </div>
-      <div id="fb-input-${c.id}" style="display:none;margin-top:8px">
-        <textarea class="feedback-input" id="fb-text-${c.id}" placeholder="What should be different? e.g. 'Too formal, make it more casual' or 'Don't mention equity'"></textarea>
-        <div class="feedback-actions" style="margin-top:6px">
-          <button class="btn-sm btn-primary" style="background:var(--accent)" onclick="regenerate('${c.id}')">🔄 Regenerate</button>
-          <button class="btn-sm btn-outline" onclick="hideFeedbackInput('${c.id}')">Cancel</button>
-          <span id="fb-status-${c.id}" style="font-size:12px;color:var(--muted)"></span>
-        </div>
-      </div>
-    </div>` : (c.status === 'sent' ? '<div style="margin-top:6px"><span class="badge badge-green">✓ Sent</span></div>' : '');
-
-  return `<div class="candidate-card" id="cand-${c.id}">
+    </div>` : '';
+  return `<div class="candidate-card">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div><span class="name">${escHtml(c.name)}</span> ${statusBadge} ${regenCount}</div>
     </div>
     <div class="headline">${escHtml(c.headline || '')}</div>
-    ${subj}${msgPreview}${err}${feedbackSection}
+    ${subj}${msgHtml}${feedbackHtml}
   </div>`;
 }
 
 function refreshCandidates() {
   const list = document.getElementById('candidates-list');
   const all = Object.values(candidates);
-  if (all.length === 0) {
-    list.innerHTML = '<p style="color:var(--muted);font-size:13px">No candidates yet.</p>';
-    return;
-  }
+  if (all.length === 0) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No candidates yet.</p>'; return; }
   list.innerHTML = all.map(renderCandidate).join('');
-  
-  // Pending section
   const pending = all.filter(c => c.status === 'pending_review');
   const ps = document.getElementById('pending-section');
-  const pl = document.getElementById('pending-list');
-  if (pending.length > 0) {
-    ps.classList.remove('hidden');
-    pl.innerHTML = pending.map(renderCandidate).join('');
-    document.getElementById('s-pending').textContent = pending.length;
-  } else {
-    ps.classList.add('hidden');
-    document.getElementById('s-pending').textContent = 0;
-  }
+  if (pending.length > 0) { ps.classList.remove('hidden'); document.getElementById('pending-list').innerHTML = pending.map(renderCandidate).join(''); }
+  else { ps.classList.add('hidden'); }
+  document.getElementById('s-pending').textContent = pending.length;
 }
 
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+function showFeedback(id) { document.getElementById('fb-' + id).classList.remove('hidden'); document.getElementById('fbt-' + id).focus(); }
 
-// API calls
-async function startRun() {
+async function approveCandidate(id) {
   try {
-    const body = {
-      project_url: document.getElementById('project-url').value,
-      run_mode: document.getElementById('run-mode').value,
-      max_candidates: parseInt(document.getElementById('max-candidates').value),
-      rate_limit_min: parseInt(document.getElementById('rate-min').value),
-      rate_limit_max: parseInt(document.getElementById('rate-max').value),
-    };
-    const resp = await fetch('/api/run', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
-    const data = await resp.json();
-    if (data.error) { log('Error: ' + data.error, 'error'); return; }
-    log('Run started: ' + data.run_mode, 'info');
-    setRunning(true);
-    candidates = {};
-    refreshCandidates();
-  } catch (e) { log('Failed to start: ' + e.message, 'error'); }
-}
-
-async function stopRun() {
-  try {
-    await fetch('/api/stop', { method: 'POST', headers: headers() });
-    log('Stop requested', 'info');
-  } catch (e) { log('Failed to stop: ' + e.message, 'error'); }
-}
-
-async function approve(id) {
-  try {
-    const resp = await fetch(`/api/approve/${id}`, { method: 'POST', headers: headers() });
+    const resp = await fetch(`/api/approve/${id}`, { method: 'POST', headers: h() });
     const data = await resp.json();
     if (data.error) log('Approve error: ' + data.error, 'error');
     else log('Approved: ' + id, 'success');
   } catch (e) { log('Approve failed: ' + e.message, 'error'); }
 }
 
-async function skip(id) {
+async function skipCandidate(id) {
   try {
-    await fetch(`/api/skip/${id}`, { method: 'POST', headers: headers() });
-    log('Skipped: ' + id, 'info');
+    await fetch(`/api/skip/${id}`, { method: 'POST', headers: h() });
     if (candidates[id]) { candidates[id].status = 'skipped'; refreshCandidates(); }
   } catch (e) { log('Skip failed: ' + e.message, 'error'); }
 }
 
-// Poll status
-async function pollStatus() {
-  try {
-    const resp = await fetch('/api/status', { headers: headers() });
-    const data = await resp.json();
-    setRunning(data.running);
-    setBrowser(data.browserConnected);
-    if (data.currentRun) updateStats(data.currentRun);
-  } catch {}
-}
-
-// WebSocket
-function connectWs() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const url = `${proto}://${location.host}/ws` + (API_KEY ? `?api_key=${API_KEY}` : '');
-  ws = new WebSocket(url);
-  
-  ws.onopen = () => {
-    document.getElementById('ws-dot').className = 'conn-dot on';
-    document.getElementById('ws-label').textContent = 'Connected';
-    log('WebSocket connected', 'success');
-  };
-  
-  ws.onclose = () => {
-    document.getElementById('ws-dot').className = 'conn-dot off';
-    document.getElementById('ws-label').textContent = 'Disconnected';
-    setTimeout(connectWs, 3000);
-  };
-  
-  ws.onerror = () => {};
-  
-  ws.onmessage = (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-      handleEvent(msg);
-    } catch {}
-  };
-}
-
-function handleEvent(msg) {
-  switch (msg.event) {
-    case 'run_started':
-      setRunning(true); log(`Run started (${msg.runMode})`, 'info'); break;
-    case 'run_completed':
-    case 'run_stopped':
-      setRunning(false);
-      log(`Run ${msg.status || msg.event}: ${msg.processed || 0} processed, ${msg.succeeded || 0} succeeded, ${msg.failed || 0} failed`, msg.failed > 0 ? 'error' : 'success');
-      updateStats(msg); break;
-    case 'run_error':
-      setRunning(false); log('Run error: ' + msg.error, 'error'); break;
-    case 'login_required':
-      log('⚠️ Login required — check the browser window', 'error'); break;
-    case 'login_success':
-      log('✓ Logged in', 'success'); break;
-    case 'candidates_found':
-      log(`Found ${msg.total} candidates, processing ${msg.processing}`, 'info'); break;
-    case 'processing_candidate':
-      log(`Processing ${msg.index}/${msg.total}: ${msg.name}`, 'info'); break;
-    case 'generating_message':
-      log(`Generating message for ${msg.candidate}...`, 'info'); break;
-    case 'message_generated':
-      if (msg.candidateId) {
-        candidates[msg.candidateId] = { ...(candidates[msg.candidateId] || {}), id: msg.candidateId, name: msg.name, subject: msg.subject, tuned_message: msg.message, message: msg.original, status: 'processing' };
-        refreshCandidates();
-      }
-      log(`Message generated for ${msg.name}`, 'success'); break;
-    case 'message_sent':
-      if (msg.candidateId && candidates[msg.candidateId]) { candidates[msg.candidateId].status = 'sent'; refreshCandidates(); }
-      log(`✓ Message sent to ${msg.name}`, 'success'); break;
-    case 'pending_review':
-      if (msg.candidateId) {
-        candidates[msg.candidateId] = { ...(candidates[msg.candidateId] || {}), id: msg.candidateId, name: msg.name, status: 'pending_review' };
-        refreshCandidates();
-      }
-      log(`⏳ ${msg.name} queued for review`, 'info'); break;
-    case 'candidate_error':
-      log(`✗ Error on candidate ${msg.index}: ${msg.error}`, 'error'); break;
-    case 'candidate_skipped':
-      if (msg.candidateId && candidates[msg.candidateId]) { candidates[msg.candidateId].status = 'skipped'; refreshCandidates(); }
-      break;
-    case 'waiting':
-      log(`Rate limit: waiting ${msg.seconds}s...`, ''); break;
-    case 'stop_requested':
-      log('Stop requested...', 'info'); break;
-    case 'status':
-      log(msg.message || '', 'info'); break;
-    case 'prompt_evolved':
-      handlePromptEvolved(msg); break;
-    default:
-      if (msg.event !== 'connected') log(JSON.stringify(msg), '');
-  }
-}
-
-// ── Feedback & Regeneration ──
-
-function showFeedbackInput(id) {
-  document.getElementById(`fb-input-${id}`).style.display = 'block';
-  document.getElementById(`fb-text-${id}`).focus();
-}
-
-function hideFeedbackInput(id) {
-  document.getElementById(`fb-input-${id}`).style.display = 'none';
-  document.getElementById(`fb-text-${id}`).value = '';
-}
-
-async function regenerate(id) {
-  const feedbackEl = document.getElementById(`fb-text-${id}`);
-  const feedback = feedbackEl.value.trim();
-  if (!feedback) { alert('Please enter your feedback before regenerating.'); feedbackEl.focus(); return; }
-
-  const statusEl = document.getElementById(`fb-status-${id}`);
+async function regenCandidate(id) {
+  const feedback = document.getElementById('fbt-' + id).value.trim();
+  if (!feedback) { alert('Please enter feedback'); return; }
+  const statusEl = document.getElementById('fbs-' + id);
   statusEl.innerHTML = '<span class="regen-spinner"></span> Regenerating...';
-
-  // Update local state to show regenerating
-  if (candidates[id]) {
-    const prevStatus = candidates[id].status;
-    candidates[id]._prevStatus = prevStatus;
-    candidates[id].status = 'regenerating';
-    refreshCandidates();
-  }
-
+  if (candidates[id]) { candidates[id].status = 'regenerating'; refreshCandidates(); }
   try {
-    const resp = await fetch(`/api/regenerate/${id}`, {
-      method: 'POST', headers: headers(),
-      body: JSON.stringify({ feedback })
-    });
+    const resp = await fetch(`/api/regenerate/${id}`, { method: 'POST', headers: h(), body: JSON.stringify({ feedback }) });
     const data = await resp.json();
-    if (data.error) {
-      alert('Regeneration failed: ' + data.error);
-      if (candidates[id]) { candidates[id].status = candidates[id]._prevStatus || 'dry_run'; refreshCandidates(); }
-      return;
-    }
-
-    // Update candidate with new message
+    if (data.error) { alert('Error: ' + data.error); if (candidates[id]) { candidates[id].status = 'dry_run'; refreshCandidates(); } return; }
     if (candidates[id]) {
       candidates[id].message = data.message;
       candidates[id].tuned_message = data.message;
@@ -526,275 +737,134 @@ async function regenerate(id) {
       candidates[id].regenCount = (candidates[id].regenCount || 0) + 1;
       refreshCandidates();
     }
-
-    log(`🔄 Regenerated message for ${candidates[id]?.name || id} (feedback: "${feedback.substring(0, 40)}...")`, 'success');
-    
-    if (data.feedbackCount && data.feedbackCount % 3 === 0) {
-      log(`🧬 Prompt auto-evolving based on ${data.feedbackCount} feedback items...`, 'info');
-    }
-  } catch (e) {
-    alert('Regeneration failed: ' + e.message);
-    if (candidates[id]) { candidates[id].status = candidates[id]._prevStatus || 'dry_run'; refreshCandidates(); }
-  }
+    log(`Regenerated message for ${candidates[id]?.name || id}`, 'success');
+  } catch (e) { alert('Failed: ' + e.message); if (candidates[id]) { candidates[id].status = 'dry_run'; refreshCandidates(); } }
 }
 
-// Handle prompt evolution events from WebSocket
-function handlePromptEvolved(msg) {
-  log(`🧬 Prompt "${msg.promptName}" auto-evolved to v${msg.version} based on your feedback!`, 'success');
-  // Refresh prompt editor if open
-  const body = document.getElementById('prompt-body');
-  if (!body.classList.contains('collapsed')) {
-    loadPromptData();
-  }
-}
-
-// ── Cookie Editor (multi-user) ──
-
-function toggleCookieEditor() {
-  const body = document.getElementById('cookie-body');
-  const btn = document.getElementById('cookie-toggle-btn');
-  const collapsed = body.classList.toggle('collapsed');
-  btn.textContent = collapsed ? '▼' : '▲';
-  if (!collapsed) loadCookieUsers();
-}
+// ── Cookie Management ──
 
 async function loadCookieUsers() {
   try {
-    const resp = await fetch('/api/cookies', { headers: headers() });
+    const resp = await fetch('/api/cookies', { headers: h() });
+    if (!resp.ok) return;
     const data = await resp.json();
     const badge = document.getElementById('cookie-badge');
     const container = document.getElementById('cookie-users');
-
-    if (data.active) {
-      badge.textContent = data.active;
-      badge.className = 'badge badge-green';
-    } else if (data.users.length > 0) {
-      badge.textContent = 'No active user';
-      badge.className = 'badge badge-yellow';
-    } else {
-      badge.textContent = 'No session';
-      badge.className = 'badge badge-gray';
-    }
-
-    if (data.users.length === 0) {
-      container.innerHTML = '<p style="color:var(--muted);font-size:13px">No saved sessions. Add a user below.</p>';
-      return;
-    }
-
+    if (data.active) { badge.textContent = data.active; badge.className = 'badge badge-green'; }
+    else if (data.users.length > 0) { badge.textContent = 'No active user'; badge.className = 'badge badge-yellow'; }
+    else { badge.textContent = 'No session'; badge.className = 'badge badge-gray'; }
+    if (data.users.length === 0) { container.innerHTML = '<p style="color:var(--muted);font-size:13px">No saved sessions.</p>'; return; }
     container.innerHTML = data.users.map(u => `
       <div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
         <span style="flex:1;font-weight:600">${escHtml(u.name)}</span>
         <span style="color:var(--muted);font-size:12px">${u.cookieCount} cookies</span>
-        ${u.name === data.active 
-          ? '<span class="badge badge-green">Active</span>' 
-          : `<button class="btn-sm btn-primary" style="background:var(--accent)" onclick="activateCookieUser('${escHtml(u.name)}')">Activate</button>`}
-        <button class="btn-sm btn-outline" onclick="deleteCookieUser('${escHtml(u.name)}')" style="color:var(--red);border-color:var(--red)">&times;</button>
-      </div>
-    `).join('');
-  } catch (e) { console.error('Failed to load cookie users:', e); }
+        ${u.name === data.active
+          ? '<span class="badge badge-green">Active</span>'
+          : `<button class="btn-sm btn-primary" onclick="activateCookie('${escHtml(u.name)}')">Activate</button>`}
+        <button class="btn-sm btn-outline" onclick="deleteCookie('${escHtml(u.name)}')" style="color:var(--red);border-color:var(--red)">&times;</button>
+      </div>`).join('');
+  } catch (e) { console.error(e); }
 }
 
 async function saveCookieUser(activate) {
   const name = document.getElementById('cookie-user-name').value.trim();
   const cookies = document.getElementById('cookie-editor').value.trim();
-  if (!name) { alert('Please enter a user name.'); document.getElementById('cookie-user-name').focus(); return; }
-  if (!cookies) { alert('Please paste cookies.'); return; }
+  if (!name) { alert('Enter a user name'); return; }
+  if (!cookies) { alert('Paste cookies'); return; }
   try {
-    const resp = await fetch('/api/cookies', {
-      method: 'PUT', headers: headers(),
-      body: JSON.stringify({ name, cookies, setActive: activate })
-    });
+    const resp = await fetch('/api/cookies', { method: 'PUT', headers: h(), body: JSON.stringify({ name, cookies, setActive: activate }) });
     const data = await resp.json();
-    if (data.error) { alert('Error: ' + data.error); return; }
-    const status = document.getElementById('cookie-save-status');
-    status.textContent = activate ? '✓ Saved & Activated' : '✓ Saved';
-    status.classList.add('show');
-    setTimeout(() => status.classList.remove('show'), 2000);
+    if (data.error) { alert(data.error); return; }
+    const s = document.getElementById('cookie-save-status');
+    s.textContent = '✓ Saved'; s.style.opacity = 1; setTimeout(() => s.style.opacity = 0, 2000);
     document.getElementById('cookie-editor').value = '';
     document.getElementById('cookie-user-name').value = '';
     loadCookieUsers();
-    log(`Cookies for "${name}" ${activate ? 'saved & activated' : 'saved'}`, 'success');
-  } catch (e) { alert('Failed to save: ' + e.message); }
-}
-
-async function activateCookieUser(name) {
-  try {
-    await fetch('/api/cookies/activate', {
-      method: 'POST', headers: headers(), body: JSON.stringify({ name })
-    });
-    loadCookieUsers();
-    log(`Activated session: ${name}`, 'success');
   } catch (e) { alert('Failed: ' + e.message); }
 }
 
-async function deleteCookieUser(name) {
-  if (!confirm(`Delete saved session for "${name}"?`)) return;
-  try {
-    await fetch(`/api/cookies/${encodeURIComponent(name)}`, { method: 'DELETE', headers: headers() });
-    loadCookieUsers();
-    log(`Deleted session: ${name}`, 'info');
-  } catch (e) { alert('Failed: ' + e.message); }
+async function activateCookie(name) {
+  try { await fetch('/api/cookies/activate', { method: 'POST', headers: h(), body: JSON.stringify({ name }) }); loadCookieUsers(); } catch (e) { alert(e.message); }
 }
 
-// Load cookie status on page load
-loadCookieUsers();
+async function deleteCookie(name) {
+  if (!confirm(`Delete session for "${name}"?`)) return;
+  try { await fetch(`/api/cookies/${encodeURIComponent(name)}`, { method: 'DELETE', headers: h() }); loadCookieUsers(); } catch (e) { alert(e.message); }
+}
 
-// ── Prompt Editor ──
+// ── WebSocket ──
 
-let promptDefaults = { recruiter: '', sales: '' };
-let savedPrompts = {};
-let currentPromptTab = 'recruiter';
-let promptDirty = false;
+function connectWs() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${location.host}/ws?token=${authToken}`;
+  ws = new WebSocket(url);
+  ws.onopen = () => {
+    document.getElementById('ws-dot').className = 'conn-dot on';
+    document.getElementById('ws-label').textContent = 'Connected';
+  };
+  ws.onclose = () => {
+    document.getElementById('ws-dot').className = 'conn-dot off';
+    document.getElementById('ws-label').textContent = 'Disconnected';
+    setTimeout(connectWs, 3000);
+  };
+  ws.onerror = () => {};
+  ws.onmessage = (e) => { try { handleEvent(JSON.parse(e.data)); } catch {} };
+}
 
-function togglePromptEditor() {
-  const body = document.getElementById('prompt-body');
-  const btn = document.getElementById('prompt-toggle-btn');
+function handleEvent(msg) {
+  switch (msg.event) {
+    case 'run_started': setRunning(true); log(`Run started (${msg.runMode})`, 'info'); break;
+    case 'run_completed': case 'run_stopped':
+      setRunning(false);
+      log(`Run ${msg.status || msg.event}: ${msg.processed||0} processed, ${msg.succeeded||0} succeeded, ${msg.failed||0} failed`, msg.failed > 0 ? 'error' : 'success');
+      updateStats(msg); break;
+    case 'run_error': setRunning(false); log('Run error: ' + msg.error, 'error'); break;
+    case 'login_required': log('⚠️ Login required — check browser window', 'error'); break;
+    case 'login_success': log('✓ Logged in', 'success'); break;
+    case 'candidates_found': log(`Found ${msg.total} candidates`, 'info'); break;
+    case 'processing_candidate': log(`Processing ${msg.index}/${msg.total}: ${msg.name}`, 'info'); break;
+    case 'generating_message': log(`Generating message for ${msg.candidate}...`, 'info'); break;
+    case 'message_generated':
+      if (msg.candidateId) {
+        candidates[msg.candidateId] = { ...(candidates[msg.candidateId]||{}), id: msg.candidateId, name: msg.name, subject: msg.subject, tuned_message: msg.message, message: msg.original, status: 'processing' };
+        refreshCandidates();
+      }
+      log(`Message generated for ${msg.name}`, 'success'); break;
+    case 'message_sent':
+      if (msg.candidateId && candidates[msg.candidateId]) { candidates[msg.candidateId].status = 'sent'; refreshCandidates(); }
+      log(`✓ Sent to ${msg.name}`, 'success'); break;
+    case 'pending_review':
+      if (msg.candidateId) { candidates[msg.candidateId] = { ...(candidates[msg.candidateId]||{}), id: msg.candidateId, name: msg.name, status: 'pending_review' }; refreshCandidates(); }
+      log(`⏳ ${msg.name} queued for review`, 'info'); break;
+    case 'candidate_error': log(`✗ Error: ${msg.error}`, 'error'); break;
+    case 'candidate_skipped':
+      if (msg.candidateId && candidates[msg.candidateId]) { candidates[msg.candidateId].status = 'skipped'; refreshCandidates(); } break;
+    case 'campaign_feedback_applied':
+      log(`🧬 Prompt evolved, ${msg.regeneratedCount} messages regenerated`, 'success');
+      if (msg.regenerated) {
+        for (const r of msg.regenerated) {
+          if (candidates[r.candidateId]) { candidates[r.candidateId].message = r.message; candidates[r.candidateId].tuned_message = r.message; }
+        }
+        refreshCandidates();
+      }
+      break;
+    case 'waiting': log(`Rate limit: waiting ${msg.seconds}s...`, ''); break;
+    case 'status': log(msg.message || '', 'info'); break;
+    default: if (msg.event !== 'connected') log(JSON.stringify(msg), '');
+  }
+}
+
+// ── Collapsible sections ──
+
+function toggleSection(bodyId, toggleId) {
+  const body = document.getElementById(bodyId);
+  const btn = document.getElementById(toggleId);
   const collapsed = body.classList.toggle('collapsed');
   btn.textContent = collapsed ? '▼' : '▲';
-  if (!collapsed && !promptDefaults.recruiter) loadPromptData();
 }
 
-async function loadPromptData() {
-  try {
-    const resp = await fetch('/api/prompt', { headers: headers() });
-    const data = await resp.json();
-    promptDefaults.recruiter = data.defaults.recruiter;
-    promptDefaults.sales = data.defaults.sales;
-    savedPrompts = data.saved || {};
-    // Show active prompt badge
-    const badge = document.getElementById('active-prompt-name');
-    if (data.active) {
-      badge.textContent = data.active;
-      badge.style.display = 'inline-block';
-    } else {
-      badge.style.display = 'none';
-    }
-    // Rebuild tabs with saved prompts
-    rebuildPromptTabs(data.savedPrompts || [], data.active);
-    // Load the active or default prompt
-    if (data.active && data.customPrompt) {
-      document.getElementById('prompt-editor').value = data.customPrompt;
-      document.getElementById('prompt-name').value = data.active;
-      setActiveTab(data.active);
-    } else {
-      document.getElementById('prompt-editor').value = promptDefaults.recruiter;
-      setActiveTab('recruiter');
-    }
-  } catch (e) {
-    console.error('Failed to load prompts:', e);
-  }
-}
-
-function rebuildPromptTabs(savedNames, activeName) {
-  const container = document.getElementById('prompt-tabs');
-  let html = `
-    <button class="prompt-tab" data-tab="recruiter" onclick="loadPromptTab('recruiter')">Recruiter (Default)</button>
-    <button class="prompt-tab" data-tab="sales" onclick="loadPromptTab('sales')">Sales (Default)</button>
-  `;
-  for (const name of savedNames) {
-    const isActive = name === activeName;
-    html += `<button class="prompt-tab" data-tab="${escHtml(name)}" onclick="loadSavedPrompt('${escHtml(name)}')">
-      ${escHtml(name)}${isActive ? ' ✓' : ''}
-      <span style="margin-left:4px;cursor:pointer;color:var(--red)" onclick="event.stopPropagation();deletePrompt('${escHtml(name)}')">&times;</span>
-    </button>`;
-  }
-  container.innerHTML = html;
-}
-
-function setActiveTab(tabName) {
-  document.querySelectorAll('.prompt-tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.tab === tabName);
-  });
-  currentPromptTab = tabName;
-}
-
-function loadPromptTab(tab) {
-  setActiveTab(tab);
-  document.getElementById('prompt-editor').value = promptDefaults[tab] || '';
-  document.getElementById('prompt-name').value = '';
-}
-
-async function loadSavedPrompt(name) {
-  setActiveTab(name);
-  if (savedPrompts[name]) {
-    document.getElementById('prompt-editor').value = savedPrompts[name];
-  } else {
-    // Fetch fresh
-    try {
-      const resp = await fetch('/api/prompt', { headers: headers() });
-      const data = await resp.json();
-      if (data.saved && data.saved[name]) {
-        document.getElementById('prompt-editor').value = data.saved[name];
-        savedPrompts[name] = data.saved[name];
-      }
-    } catch (e) { console.error(e); }
-  }
-  document.getElementById('prompt-name').value = name;
-}
-
-async function savePrompt(activate) {
-  const name = document.getElementById('prompt-name').value.trim();
-  const prompt = document.getElementById('prompt-editor').value;
-  if (!name) {
-    alert('Please enter a prompt name before saving.');
-    document.getElementById('prompt-name').focus();
-    return;
-  }
-  if (!prompt.trim()) {
-    alert('Prompt cannot be empty.');
-    return;
-  }
-  try {
-    const resp = await fetch('/api/prompt', {
-      method: 'PUT',
-      headers: headers(),
-      body: JSON.stringify({ name, prompt, setActive: activate }),
-    });
-    const data = await resp.json();
-    if (data.error) { alert('Error: ' + data.error); return; }
-    // Flash save status
-    const status = document.getElementById('prompt-status');
-    status.textContent = activate ? '✓ Saved & Activated' : '✓ Saved';
-    status.classList.add('show');
-    setTimeout(() => status.classList.remove('show'), 2000);
-    // Reload tabs
-    await loadPromptData();
-    log(`Prompt "${name}" ${activate ? 'saved & activated' : 'saved'}`, 'success');
-  } catch (e) {
-    alert('Failed to save: ' + e.message);
-  }
-}
-
-async function resetToDefault() {
-  try {
-    await fetch('/api/prompt/activate', {
-      method: 'POST', headers: headers(), body: JSON.stringify({ name: null })
-    });
-    await loadPromptData();
-    document.getElementById('prompt-editor').value = promptDefaults.recruiter;
-    document.getElementById('prompt-name').value = '';
-    setActiveTab('recruiter');
-    const status = document.getElementById('prompt-status');
-    status.textContent = '✓ Reset to default';
-    status.classList.add('show');
-    setTimeout(() => status.classList.remove('show'), 2000);
-    log('Prompt reset to default', 'info');
-  } catch (e) { alert('Failed to reset: ' + e.message); }
-}
-
-async function deletePrompt(name) {
-  if (!confirm(`Delete prompt "${name}"?`)) return;
-  try {
-    await fetch(`/api/prompt/${encodeURIComponent(name)}`, { method: 'DELETE', headers: headers() });
-    await loadPromptData();
-    log(`Prompt "${name}" deleted`, 'info');
-  } catch (e) { alert('Failed to delete: ' + e.message); }
-}
-
-// Init
-pollStatus();
-setInterval(pollStatus, 5000);
-connectWs();
+// ── Init ──
+checkAuth();
 </script>
 </body>
 </html>
