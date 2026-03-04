@@ -42,29 +42,43 @@ function savePrompts(data) {
 
 let promptStore = loadPrompts();
 
-// ── Cookie Storage ──
+// ── Cookie Storage (multi-user) ──
 const COOKIES_FILE = path.join(__dirname, 'cookies.json');
+
+const DEFAULT_COOKIES_FILE = path.join(__dirname, 'default-cookies.json');
 
 function loadCookies() {
   try {
     if (fs.existsSync(COOKIES_FILE)) {
-      return JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf8'));
+      const data = JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf8'));
+      // Migrate old single-cookie format to multi-user
+      if (data.cookies && !data.users) {
+        return { active: 'default', users: { default: data.cookies } };
+      }
+      return data;
+    }
+    // Seed from default-cookies.json on first run
+    if (fs.existsSync(DEFAULT_COOKIES_FILE)) {
+      console.log('[cookies] Seeding from default-cookies.json');
+      const data = JSON.parse(fs.readFileSync(DEFAULT_COOKIES_FILE, 'utf8'));
+      saveCookiesStore(data);
+      return data;
     }
   } catch (e) {
     console.error('[cookies] Failed to load cookies.json:', e.message);
   }
-  return { cookies: null };
+  return { active: null, users: {} };
 }
 
-function saveCookies(data) {
+function saveCookiesStore(data) {
   fs.writeFileSync(COOKIES_FILE, JSON.stringify(data, null, 2), 'utf8');
 }
 
 let cookieStore = loadCookies();
-// Load saved cookies into engine on startup
-if (cookieStore.cookies) {
-  engine.setSessionCookies(cookieStore.cookies);
-  console.log('[cookies] Loaded saved session cookies');
+// Load active user's cookies into engine on startup
+if (cookieStore.active && cookieStore.users[cookieStore.active]) {
+  engine.setSessionCookies(cookieStore.users[cookieStore.active]);
+  console.log(`[cookies] Loaded saved session cookies for user: ${cookieStore.active}`);
 }
 
 const PORT = parseInt(process.env.PORT) || 3847;
@@ -245,42 +259,63 @@ app.get('/api/prompt/active', auth, (req, res) => {
   res.json({ active: promptStore.active, prompt: activePrompt });
 });
 
-// ── Cookie Management ──
+// ── Cookie Management (multi-user) ──
 
 app.get('/api/cookies', auth, (req, res) => {
-  const hasCookies = !!cookieStore.cookies;
-  // Don't send full cookie values back for security — just metadata
-  let preview = '';
-  if (cookieStore.cookies) {
-    const trimmed = cookieStore.cookies.trim();
-    if (trimmed.startsWith('[')) {
-      try { preview = `JSON array (${JSON.parse(trimmed).length} cookies)`; } catch { preview = 'JSON format'; }
-    } else {
-      const count = trimmed.split(';').filter(s => s.includes('=')).length;
-      preview = `${count} cookie pairs`;
-    }
-  }
-  res.json({ hasCookies, preview });
+  const users = Object.keys(cookieStore.users).map(name => {
+    const raw = cookieStore.users[name];
+    const count = raw.split(';').filter(s => s.includes('=')).length;
+    return { name, cookieCount: count };
+  });
+  res.json({ active: cookieStore.active, users });
 });
 
+// Save cookies for a user
 app.put('/api/cookies', auth, (req, res) => {
-  const { cookies } = req.body;
+  const { name, cookies, setActive } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'name is required' });
+  }
   if (!cookies || !cookies.trim()) {
     return res.status(400).json({ error: 'cookies string is required' });
   }
-  cookieStore.cookies = cookies;
-  saveCookies(cookieStore);
-  engine.setSessionCookies(cookies);
-  console.log(`[cookies] Session cookies saved (${cookies.length} chars)`);
-  res.json({ status: 'saved', length: cookies.length });
+  cookieStore.users[name.trim()] = cookies.trim();
+  if (setActive) {
+    cookieStore.active = name.trim();
+    engine.setSessionCookies(cookies.trim());
+  }
+  saveCookiesStore(cookieStore);
+  console.log(`[cookies] Session cookies saved for user: ${name} (${cookies.length} chars)${setActive ? ' [ACTIVATED]' : ''}`);
+  res.json({ status: 'saved', name: name.trim(), active: cookieStore.active });
 });
 
-app.delete('/api/cookies', auth, (req, res) => {
-  cookieStore.cookies = null;
-  saveCookies(cookieStore);
-  engine.setSessionCookies(null);
-  console.log('[cookies] Session cookies cleared');
-  res.json({ status: 'cleared' });
+// Activate a user's cookies
+app.post('/api/cookies/activate', auth, (req, res) => {
+  const { name } = req.body;
+  if (!name || !cookieStore.users[name]) {
+    return res.status(404).json({ error: `User "${name}" not found` });
+  }
+  cookieStore.active = name;
+  engine.setSessionCookies(cookieStore.users[name]);
+  saveCookiesStore(cookieStore);
+  console.log(`[cookies] Activated cookies for user: ${name}`);
+  res.json({ status: 'activated', active: name });
+});
+
+// Delete a user's cookies
+app.delete('/api/cookies/:name', auth, (req, res) => {
+  const { name } = req.params;
+  if (!cookieStore.users[name]) {
+    return res.status(404).json({ error: `User "${name}" not found` });
+  }
+  delete cookieStore.users[name];
+  if (cookieStore.active === name) {
+    cookieStore.active = null;
+    engine.setSessionCookies(null);
+  }
+  saveCookiesStore(cookieStore);
+  console.log(`[cookies] Deleted cookies for user: ${name}`);
+  res.json({ status: 'deleted', name });
 });
 
 // Health check (no auth)

@@ -110,23 +110,27 @@
   <!-- Session Cookies -->
   <div class="card" id="cookie-section">
     <div class="cookie-header" onclick="toggleCookieEditor()">
-      <h2>🔑 LinkedIn Session <span id="cookie-badge" class="badge badge-gray">No cookies</span></h2>
+      <h2>🔑 LinkedIn Session <span id="cookie-badge" class="badge badge-gray">No session</span></h2>
       <button class="prompt-toggle" id="cookie-toggle-btn">▼</button>
     </div>
     <div class="cookie-body collapsed" id="cookie-body">
       <p class="prompt-info">
-        Paste your LinkedIn session cookies here. This allows the automation to use your logged-in session.<br>
-        <strong>How to get cookies:</strong> Log into LinkedIn in Chrome → Press F12 → Application tab → Cookies → linkedin.com → Copy the <code>li_at</code> cookie value, or copy all cookies.<br>
-        <strong>Formats accepted:</strong> <code>name=value; name2=value2</code> (from Cookie header) or JSON array from browser dev tools.
+        Each user saves their own LinkedIn session cookies. Select the active user before starting a run.<br>
+        <strong>How to get cookies:</strong> Log into LinkedIn in Chrome → F12 → Network tab → click any request → copy the <code>Cookie:</code> header value.
       </p>
-      <div class="cookie-status-line" id="cookie-status-line">
-        <span id="cookie-status-text" style="color:var(--muted)">No cookies saved</span>
-      </div>
-      <textarea class="cookie-editor" id="cookie-editor" placeholder="Paste cookies here...&#10;&#10;Example: li_at=AQEDAS...; JSESSIONID=ajax:123...; bcookie=..."></textarea>
-      <div class="prompt-actions">
-        <button class="btn-sm btn-green" onclick="saveCookies()">💾 Save Cookies</button>
-        <button class="btn-sm btn-outline" onclick="clearCookies()">🗑 Clear</button>
-        <span class="prompt-status" id="cookie-save-status">✓ Saved</span>
+      <!-- Saved users list -->
+      <div id="cookie-users" style="margin-bottom:12px"></div>
+      <!-- Add / update user -->
+      <div style="border-top:1px solid var(--border); padding-top:12px; margin-top:4px">
+        <label>User Name</label>
+        <input id="cookie-user-name" placeholder="e.g. Joe Hawn" style="width:250px; margin-bottom:8px">
+        <label>Paste Cookies</label>
+        <textarea class="cookie-editor" id="cookie-editor" placeholder="Paste full cookie string here...&#10;&#10;Example: li_at=AQEDAS...; JSESSIONID=ajax:123...; bcookie=..."></textarea>
+        <div class="prompt-actions">
+          <button class="btn-sm btn-green" onclick="saveCookieUser(false)">💾 Save</button>
+          <button class="btn-sm btn-primary" onclick="saveCookieUser(true)" style="background:var(--accent)">💾 Save & Activate</button>
+          <span class="prompt-status" id="cookie-save-status">✓ Saved</span>
+        </div>
       </div>
     </div>
   </div>
@@ -449,67 +453,96 @@ function handleEvent(msg) {
   }
 }
 
-// ── Cookie Editor ──
+// ── Cookie Editor (multi-user) ──
 
 function toggleCookieEditor() {
   const body = document.getElementById('cookie-body');
   const btn = document.getElementById('cookie-toggle-btn');
   const collapsed = body.classList.toggle('collapsed');
   btn.textContent = collapsed ? '▼' : '▲';
-  if (!collapsed) loadCookieStatus();
+  if (!collapsed) loadCookieUsers();
 }
 
-async function loadCookieStatus() {
+async function loadCookieUsers() {
   try {
     const resp = await fetch('/api/cookies', { headers: headers() });
     const data = await resp.json();
     const badge = document.getElementById('cookie-badge');
-    const statusText = document.getElementById('cookie-status-text');
-    if (data.hasCookies) {
-      badge.textContent = '✓ Cookies saved';
+    const container = document.getElementById('cookie-users');
+
+    if (data.active) {
+      badge.textContent = data.active;
       badge.className = 'badge badge-green';
-      statusText.textContent = `Saved: ${data.preview}`;
-      statusText.style.color = 'var(--green)';
+    } else if (data.users.length > 0) {
+      badge.textContent = 'No active user';
+      badge.className = 'badge badge-yellow';
     } else {
-      badge.textContent = 'No cookies';
+      badge.textContent = 'No session';
       badge.className = 'badge badge-gray';
-      statusText.textContent = 'No cookies saved';
-      statusText.style.color = 'var(--muted)';
     }
-  } catch (e) { console.error('Failed to load cookie status:', e); }
+
+    if (data.users.length === 0) {
+      container.innerHTML = '<p style="color:var(--muted);font-size:13px">No saved sessions. Add a user below.</p>';
+      return;
+    }
+
+    container.innerHTML = data.users.map(u => `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
+        <span style="flex:1;font-weight:600">${escHtml(u.name)}</span>
+        <span style="color:var(--muted);font-size:12px">${u.cookieCount} cookies</span>
+        ${u.name === data.active 
+          ? '<span class="badge badge-green">Active</span>' 
+          : `<button class="btn-sm btn-primary" style="background:var(--accent)" onclick="activateCookieUser('${escHtml(u.name)}')">Activate</button>`}
+        <button class="btn-sm btn-outline" onclick="deleteCookieUser('${escHtml(u.name)}')" style="color:var(--red);border-color:var(--red)">&times;</button>
+      </div>
+    `).join('');
+  } catch (e) { console.error('Failed to load cookie users:', e); }
 }
 
-async function saveCookies() {
+async function saveCookieUser(activate) {
+  const name = document.getElementById('cookie-user-name').value.trim();
   const cookies = document.getElementById('cookie-editor').value.trim();
-  if (!cookies) { alert('Please paste your cookies first.'); return; }
+  if (!name) { alert('Please enter a user name.'); document.getElementById('cookie-user-name').focus(); return; }
+  if (!cookies) { alert('Please paste cookies.'); return; }
   try {
     const resp = await fetch('/api/cookies', {
-      method: 'PUT', headers: headers(), body: JSON.stringify({ cookies })
+      method: 'PUT', headers: headers(),
+      body: JSON.stringify({ name, cookies, setActive: activate })
     });
     const data = await resp.json();
     if (data.error) { alert('Error: ' + data.error); return; }
     const status = document.getElementById('cookie-save-status');
-    status.textContent = '✓ Saved';
+    status.textContent = activate ? '✓ Saved & Activated' : '✓ Saved';
     status.classList.add('show');
     setTimeout(() => status.classList.remove('show'), 2000);
     document.getElementById('cookie-editor').value = '';
-    loadCookieStatus();
-    log('LinkedIn session cookies saved', 'success');
+    document.getElementById('cookie-user-name').value = '';
+    loadCookieUsers();
+    log(`Cookies for "${name}" ${activate ? 'saved & activated' : 'saved'}`, 'success');
   } catch (e) { alert('Failed to save: ' + e.message); }
 }
 
-async function clearCookies() {
-  if (!confirm('Clear saved LinkedIn cookies?')) return;
+async function activateCookieUser(name) {
   try {
-    await fetch('/api/cookies', { method: 'DELETE', headers: headers() });
-    document.getElementById('cookie-editor').value = '';
-    loadCookieStatus();
-    log('LinkedIn cookies cleared', 'info');
-  } catch (e) { alert('Failed to clear: ' + e.message); }
+    await fetch('/api/cookies/activate', {
+      method: 'POST', headers: headers(), body: JSON.stringify({ name })
+    });
+    loadCookieUsers();
+    log(`Activated session: ${name}`, 'success');
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function deleteCookieUser(name) {
+  if (!confirm(`Delete saved session for "${name}"?`)) return;
+  try {
+    await fetch(`/api/cookies/${encodeURIComponent(name)}`, { method: 'DELETE', headers: headers() });
+    loadCookieUsers();
+    log(`Deleted session: ${name}`, 'info');
+  } catch (e) { alert('Failed: ' + e.message); }
 }
 
 // Load cookie status on page load
-loadCookieStatus();
+loadCookieUsers();
 
 // ── Prompt Editor ──
 
