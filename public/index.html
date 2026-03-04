@@ -657,7 +657,8 @@ function renderCandidate(c) {
   const statusBadge = {
     dry_run: '<span class="badge badge-blue">Dry Run</span>',
     pending_review: '<span class="badge badge-yellow">Pending</span>',
-    sent: '<span class="badge badge-green">Sent</span>',
+    sent: '<span class="badge badge-green">✅ Sent</span>',
+    sending: '<span class="badge badge-blue"><span class="regen-spinner"></span> Sending...</span>',
     error: '<span class="badge badge-red">Error</span>',
     skipped: '<span class="badge badge-gray">Skipped</span>',
     regenerating: '<span class="badge badge-blue"><span class="regen-spinner"></span></span>',
@@ -665,8 +666,9 @@ function renderCandidate(c) {
   const msg = c.tuned_message || c.message || '';
   const msgHtml = msg ? `<div class="msg-preview">${escHtml(msg)}</div>` : '';
   const subj = c.subject ? `<div style="font-size:12px;color:var(--accent)">Subject: ${escHtml(c.subject)}</div>` : '';
+  const errHtml = c.error ? `<div style="font-size:12px;color:var(--red);margin-top:4px">Error: ${escHtml(c.error)}</div>` : '';
   const regenCount = c.regenCount ? `<span class="version-badge">v${c.regenCount + 1}</span>` : '';
-  const canFeedback = msg && c.status !== 'sent' && c.status !== 'skipped' && c.status !== 'regenerating';
+  const canFeedback = msg && c.status !== 'sent' && c.status !== 'skipped' && c.status !== 'regenerating' && c.status !== 'sending';
   const feedbackHtml = canFeedback ? `
     <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
       <button class="btn-sm btn-green" onclick="approveCandidate('${c.id}')" title="Approve">👍</button>
@@ -686,7 +688,7 @@ function renderCandidate(c) {
       <div><span class="name">${escHtml(c.name)}</span> ${statusBadge} ${regenCount}</div>
     </div>
     <div class="headline">${escHtml(c.headline || '')}</div>
-    ${subj}${msgHtml}${feedbackHtml}
+    ${subj}${msgHtml}${errHtml}${feedbackHtml}
   </div>`;
 }
 
@@ -705,12 +707,24 @@ function refreshCandidates() {
 function showFeedback(id) { document.getElementById('fb-' + id).classList.remove('hidden'); document.getElementById('fbt-' + id).focus(); }
 
 async function approveCandidate(id) {
+  const name = candidates[id]?.name || id;
+  // Immediately show "sending" state
+  if (candidates[id]) { candidates[id].status = 'sending'; refreshCandidates(); }
+  log(`📤 Sending message to ${name}...`, 'info');
   try {
     const resp = await fetch(`/api/approve/${id}`, { method: 'POST', headers: h() });
     const data = await resp.json();
-    if (data.error) log('Approve error: ' + data.error, 'error');
-    else log('Approved: ' + id, 'success');
-  } catch (e) { log('Approve failed: ' + e.message, 'error'); }
+    if (data.error) {
+      log(`❌ Failed to send to ${name}: ${data.error}`, 'error');
+      if (candidates[id]) { candidates[id].status = 'error'; candidates[id].error = data.error; refreshCandidates(); }
+    } else {
+      log(`✅ Message sent to ${name}!`, 'success');
+      if (candidates[id]) { candidates[id].status = 'sent'; refreshCandidates(); }
+    }
+  } catch (e) {
+    log(`❌ Failed to send to ${name}: ${e.message}`, 'error');
+    if (candidates[id]) { candidates[id].status = 'error'; candidates[id].error = e.message; refreshCandidates(); }
+  }
 }
 
 async function skipCandidate(id) {
