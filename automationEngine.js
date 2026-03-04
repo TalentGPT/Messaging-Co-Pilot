@@ -15,6 +15,8 @@ let currentRun = null;
 let stopRequested = false;
 let broadcastFn = () => {};
 let _sessionCookies = null;  // LinkedIn cookies from UI
+let _currentUserId = null;
+let _currentCampaignId = null;
 
 function setBroadcast(fn) { broadcastFn = fn; }
 
@@ -1012,6 +1014,8 @@ async function runOutreach(options = {}) {
     rateLimitMin = parseInt(process.env.RATE_LIMIT_MIN) || 20,
     rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX) || 60,
     customPrompt = null,
+    userId = null,
+    campaignId = null,
   } = options;
 
   // Set the custom prompt for this run
@@ -1020,8 +1024,12 @@ async function runOutreach(options = {}) {
     console.log('[run] Using custom prompt from dashboard');
   }
 
+  // Store userId and campaignId for candidate creation
+  _currentUserId = userId;
+  _currentCampaignId = campaignId;
+
   stopRequested = false;
-  const runId = store.createRun(projectUrl, runMode, maxCandidates);
+  const runId = store.createRun(projectUrl, runMode, maxCandidates, userId, campaignId);
   currentRun = runId;
 
   broadcast('run_started', { runId, runMode, maxCandidates, projectUrl });
@@ -1145,7 +1153,7 @@ async function runOutreach(options = {}) {
         console.log(`[run] Processing ${processed + 1}/${maxCandidates}: ${info.name}`);
         broadcast('processing_candidate', { index: processed + 1, total: maxCandidates, name: info.name });
 
-        candidateId = store.createCandidate({ ...info, run_mode: runMode });
+        candidateId = store.createCandidate({ ...info, run_mode: runMode, userId: _currentUserId, campaignId: _currentCampaignId });
 
         // Generate message
         const generated = await generateMessage(info, card);
