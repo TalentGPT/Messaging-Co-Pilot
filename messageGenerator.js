@@ -244,12 +244,23 @@ async function generateOutreachMessage(candidateInfo, mode, customPrompt) {
 
   if (customPrompt) {
     // Custom prompt from the UI — inject profile data into placeholders
-    systemPrompt = customPrompt
-      .replace('<<<>>>', profileText)
-      .replace('[INSERT PROFILE DATA HERE]', profileText)
-      .replace('{{CANDIDATE_PROFILE_JSON_OR_TEXT}}', profileText)
-      .replace(/\{\{CANDIDATE_PROFILE\}\}/gi, profileText);
+    const hasPlaceholder = customPrompt.includes('<<<>>>') ||
+      customPrompt.includes('[INSERT PROFILE DATA HERE]') ||
+      customPrompt.includes('{{CANDIDATE_PROFILE_JSON_OR_TEXT}}') ||
+      /\{\{CANDIDATE_PROFILE\}\}/i.test(customPrompt);
+
+    if (hasPlaceholder) {
+      systemPrompt = customPrompt
+        .replace('<<<>>>', profileText)
+        .replace('[INSERT PROFILE DATA HERE]', profileText)
+        .replace('{{CANDIDATE_PROFILE_JSON_OR_TEXT}}', profileText)
+        .replace(/\{\{CANDIDATE_PROFILE\}\}/gi, profileText);
+    } else {
+      // No placeholder found — append profile data to the end of the prompt
+      systemPrompt = customPrompt + '\n\n--- CANDIDATE PROFILE ---\n' + profileText;
+    }
     userContent = profileText;
+    console.log(`[messageGen] Using CUSTOM prompt (${customPrompt.length} chars, placeholder: ${hasPlaceholder})`);
   } else if (outreachMode === 'sales') {
     // For sales mode, replace the placeholder in the prompt
     systemPrompt = SALES_PROMPT.replace('[INSERT PROFILE DATA HERE]', profileText);

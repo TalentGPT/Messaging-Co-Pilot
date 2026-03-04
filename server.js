@@ -108,6 +108,7 @@ app.post('/api/run', auth, async (req, res) => {
   // Resolve the active custom prompt (if any)
   const activePromptName = promptStore.active;
   const customPrompt = activePromptName ? promptStore.saved[activePromptName] : null;
+  console.log(`[server] Starting run — active prompt: ${activePromptName || 'DEFAULT'}, custom prompt length: ${customPrompt ? customPrompt.length : 0}`);
 
   const options = {
     projectUrl: req.body.project_url || process.env.PROJECT_URL,

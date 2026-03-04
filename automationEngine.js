@@ -583,12 +583,25 @@ function setCustomPrompt(prompt) {
 
 async function generateMessage(candidateInfo) {
   console.log(`[message] Generating message for ${candidateInfo.name}...`);
+  console.log(`[message] Custom prompt active: ${_currentCustomPrompt ? 'YES (' + _currentCustomPrompt.substring(0, 80) + '...)' : 'NO (using default)'}`);
   broadcast('generating_message', { candidate: candidateInfo.name });
 
   const mode = process.env.OUTREACH_MODE || 'recruiter';
   const result = await generateOutreachMessage(candidateInfo, mode, _currentCustomPrompt);
 
-  // Parse structured response for recruiter mode
+  // If using a custom prompt, return the raw response (don't parse with recruiter format)
+  if (_currentCustomPrompt) {
+    console.log(`[message] Custom prompt response (first 200 chars): ${result.message.substring(0, 200)}`);
+    // Try to extract subject if present, otherwise leave empty
+    const parsed = parseRecruiterResponse(result.message);
+    return {
+      subject: parsed.subject || '',
+      message: parsed.body || result.message,
+      profile: result.profile,
+    };
+  }
+
+  // Parse structured response for recruiter mode (default prompts only)
   if (mode === 'recruiter') {
     const parsed = parseRecruiterResponse(result.message);
     return {
