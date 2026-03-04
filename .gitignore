@@ -4,3 +4,5 @@ browser-data/
 screenshots/
 *.db
 *.sqlite
+cookies.json
+prompts.json

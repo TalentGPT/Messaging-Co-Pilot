@@ -42,6 +42,31 @@ function savePrompts(data) {
 
 let promptStore = loadPrompts();
 
+// ── Cookie Storage ──
+const COOKIES_FILE = path.join(__dirname, 'cookies.json');
+
+function loadCookies() {
+  try {
+    if (fs.existsSync(COOKIES_FILE)) {
+      return JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf8'));
+    }
+  } catch (e) {
+    console.error('[cookies] Failed to load cookies.json:', e.message);
+  }
+  return { cookies: null };
+}
+
+function saveCookies(data) {
+  fs.writeFileSync(COOKIES_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+
+let cookieStore = loadCookies();
+// Load saved cookies into engine on startup
+if (cookieStore.cookies) {
+  engine.setSessionCookies(cookieStore.cookies);
+  console.log('[cookies] Loaded saved session cookies');
+}
+
 const PORT = parseInt(process.env.PORT) || 3847;
 const API_KEY = process.env.BRIDGE_API_KEY || '';
 
@@ -218,6 +243,44 @@ app.delete('/api/prompt/:name', auth, (req, res) => {
 app.get('/api/prompt/active', auth, (req, res) => {
   const activePrompt = promptStore.active ? promptStore.saved[promptStore.active] : null;
   res.json({ active: promptStore.active, prompt: activePrompt });
+});
+
+// ── Cookie Management ──
+
+app.get('/api/cookies', auth, (req, res) => {
+  const hasCookies = !!cookieStore.cookies;
+  // Don't send full cookie values back for security — just metadata
+  let preview = '';
+  if (cookieStore.cookies) {
+    const trimmed = cookieStore.cookies.trim();
+    if (trimmed.startsWith('[')) {
+      try { preview = `JSON array (${JSON.parse(trimmed).length} cookies)`; } catch { preview = 'JSON format'; }
+    } else {
+      const count = trimmed.split(';').filter(s => s.includes('=')).length;
+      preview = `${count} cookie pairs`;
+    }
+  }
+  res.json({ hasCookies, preview });
+});
+
+app.put('/api/cookies', auth, (req, res) => {
+  const { cookies } = req.body;
+  if (!cookies || !cookies.trim()) {
+    return res.status(400).json({ error: 'cookies string is required' });
+  }
+  cookieStore.cookies = cookies;
+  saveCookies(cookieStore);
+  engine.setSessionCookies(cookies);
+  console.log(`[cookies] Session cookies saved (${cookies.length} chars)`);
+  res.json({ status: 'saved', length: cookies.length });
+});
+
+app.delete('/api/cookies', auth, (req, res) => {
+  cookieStore.cookies = null;
+  saveCookies(cookieStore);
+  engine.setSessionCookies(null);
+  console.log('[cookies] Session cookies cleared');
+  res.json({ status: 'cleared' });
 });
 
 // Health check (no auth)

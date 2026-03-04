@@ -74,6 +74,14 @@
   .prompt-status.show { opacity: 1; }
   .prompt-info { font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
   .active-prompt-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: rgba(34,197,94,.15); color: var(--green); margin-left: 8px; }
+  /* Cookies */
+  .cookie-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .cookie-header h2 { margin: 0; }
+  .cookie-body { margin-top: 16px; }
+  .cookie-body.collapsed { display: none; }
+  textarea.cookie-editor { width: 100%; min-height: 120px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'SF Mono', 'Consolas', monospace; font-size: 12px; line-height: 1.4; resize: vertical; margin-bottom: 12px; }
+  textarea.cookie-editor:focus { outline: none; border-color: var(--accent); }
+  .cookie-status-line { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -96,6 +104,30 @@
       <div class="stat"><div class="num" id="s-succeeded" style="color:var(--green)">0</div><div class="label">Succeeded</div></div>
       <div class="stat"><div class="num" id="s-failed" style="color:var(--red)">0</div><div class="label">Failed</div></div>
       <div class="stat"><div class="num" id="s-pending" style="color:var(--yellow)">0</div><div class="label">Pending</div></div>
+    </div>
+  </div>
+
+  <!-- Session Cookies -->
+  <div class="card" id="cookie-section">
+    <div class="cookie-header" onclick="toggleCookieEditor()">
+      <h2>🔑 LinkedIn Session <span id="cookie-badge" class="badge badge-gray">No cookies</span></h2>
+      <button class="prompt-toggle" id="cookie-toggle-btn">▼</button>
+    </div>
+    <div class="cookie-body collapsed" id="cookie-body">
+      <p class="prompt-info">
+        Paste your LinkedIn session cookies here. This allows the automation to use your logged-in session.<br>
+        <strong>How to get cookies:</strong> Log into LinkedIn in Chrome → Press F12 → Application tab → Cookies → linkedin.com → Copy the <code>li_at</code> cookie value, or copy all cookies.<br>
+        <strong>Formats accepted:</strong> <code>name=value; name2=value2</code> (from Cookie header) or JSON array from browser dev tools.
+      </p>
+      <div class="cookie-status-line" id="cookie-status-line">
+        <span id="cookie-status-text" style="color:var(--muted)">No cookies saved</span>
+      </div>
+      <textarea class="cookie-editor" id="cookie-editor" placeholder="Paste cookies here...&#10;&#10;Example: li_at=AQEDAS...; JSESSIONID=ajax:123...; bcookie=..."></textarea>
+      <div class="prompt-actions">
+        <button class="btn-sm btn-green" onclick="saveCookies()">💾 Save Cookies</button>
+        <button class="btn-sm btn-outline" onclick="clearCookies()">🗑 Clear</button>
+        <span class="prompt-status" id="cookie-save-status">✓ Saved</span>
+      </div>
     </div>
   </div>
 
@@ -416,6 +448,68 @@ function handleEvent(msg) {
       if (msg.event !== 'connected') log(JSON.stringify(msg), '');
   }
 }
+
+// ── Cookie Editor ──
+
+function toggleCookieEditor() {
+  const body = document.getElementById('cookie-body');
+  const btn = document.getElementById('cookie-toggle-btn');
+  const collapsed = body.classList.toggle('collapsed');
+  btn.textContent = collapsed ? '▼' : '▲';
+  if (!collapsed) loadCookieStatus();
+}
+
+async function loadCookieStatus() {
+  try {
+    const resp = await fetch('/api/cookies', { headers: headers() });
+    const data = await resp.json();
+    const badge = document.getElementById('cookie-badge');
+    const statusText = document.getElementById('cookie-status-text');
+    if (data.hasCookies) {
+      badge.textContent = '✓ Cookies saved';
+      badge.className = 'badge badge-green';
+      statusText.textContent = `Saved: ${data.preview}`;
+      statusText.style.color = 'var(--green)';
+    } else {
+      badge.textContent = 'No cookies';
+      badge.className = 'badge badge-gray';
+      statusText.textContent = 'No cookies saved';
+      statusText.style.color = 'var(--muted)';
+    }
+  } catch (e) { console.error('Failed to load cookie status:', e); }
+}
+
+async function saveCookies() {
+  const cookies = document.getElementById('cookie-editor').value.trim();
+  if (!cookies) { alert('Please paste your cookies first.'); return; }
+  try {
+    const resp = await fetch('/api/cookies', {
+      method: 'PUT', headers: headers(), body: JSON.stringify({ cookies })
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+    const status = document.getElementById('cookie-save-status');
+    status.textContent = '✓ Saved';
+    status.classList.add('show');
+    setTimeout(() => status.classList.remove('show'), 2000);
+    document.getElementById('cookie-editor').value = '';
+    loadCookieStatus();
+    log('LinkedIn session cookies saved', 'success');
+  } catch (e) { alert('Failed to save: ' + e.message); }
+}
+
+async function clearCookies() {
+  if (!confirm('Clear saved LinkedIn cookies?')) return;
+  try {
+    await fetch('/api/cookies', { method: 'DELETE', headers: headers() });
+    document.getElementById('cookie-editor').value = '';
+    loadCookieStatus();
+    log('LinkedIn cookies cleared', 'info');
+  } catch (e) { alert('Failed to clear: ' + e.message); }
+}
+
+// Load cookie status on page load
+loadCookieStatus();
 
 // ── Prompt Editor ──
 

@@ -14,6 +14,7 @@ let page = null;
 let currentRun = null;
 let stopRequested = false;
 let broadcastFn = () => {};
+let _sessionCookies = null;  // LinkedIn cookies from UI
 
 function setBroadcast(fn) { broadcastFn = fn; }
 
@@ -204,8 +205,74 @@ async function launchBrowser() {
   return { context, page };
 }
 
+function setSessionCookies(cookies) {
+  _sessionCookies = cookies;
+}
+
+// Parse cookie string (from browser dev tools) into Playwright cookie objects
+function parseCookieString(cookieStr) {
+  if (!cookieStr || !cookieStr.trim()) return [];
+  
+  // If it's already JSON (array of cookie objects), parse it
+  const trimmed = cookieStr.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      // Ensure each cookie has required fields
+      return parsed.map(c => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain || '.linkedin.com',
+        path: c.path || '/',
+        secure: c.secure !== undefined ? c.secure : true,
+        httpOnly: c.httpOnly !== undefined ? c.httpOnly : false,
+        sameSite: c.sameSite || 'None',
+      })).filter(c => c.name && c.value);
+    } catch (e) {
+      console.error('[cookies] Failed to parse JSON cookies:', e.message);
+    }
+  }
+
+  // Parse "name=value; name2=value2" format (from document.cookie or Cookie header)
+  return trimmed.split(';').map(pair => {
+    const eqIdx = pair.indexOf('=');
+    if (eqIdx === -1) return null;
+    const name = pair.substring(0, eqIdx).trim();
+    const value = pair.substring(eqIdx + 1).trim();
+    if (!name) return null;
+    return {
+      name,
+      value,
+      domain: '.linkedin.com',
+      path: '/',
+      secure: true,
+      httpOnly: false,
+      sameSite: 'None',
+    };
+  }).filter(Boolean);
+}
+
+async function injectCookies() {
+  if (!_sessionCookies || !context) return false;
+  
+  const cookies = parseCookieString(_sessionCookies);
+  if (cookies.length === 0) {
+    console.log('[cookies] No valid cookies to inject');
+    return false;
+  }
+
+  console.log(`[cookies] Injecting ${cookies.length} cookies into browser context...`);
+  await context.addCookies(cookies);
+  console.log(`[cookies] Successfully injected ${cookies.length} cookies`);
+  broadcast('status', { message: `Injected ${cookies.length} LinkedIn session cookies` });
+  return true;
+}
+
 async function ensureLoggedIn(projectUrl) {
   if (!page) throw new Error('Browser not launched');
+
+  // Inject cookies before navigating (if provided via UI)
+  await injectCookies();
 
   console.log('[login] Navigating to LinkedIn Recruiter...');
   broadcast('status', { message: 'Navigating to LinkedIn Recruiter...' });
@@ -1349,5 +1416,5 @@ async function closeBrowser() {
 
 module.exports = {
   runOutreach, approveCandidate, requestStop, getStatus,
-  launchBrowser, closeBrowser, setBroadcast,
+  launchBrowser, closeBrowser, setBroadcast, setSessionCookies,
 };
