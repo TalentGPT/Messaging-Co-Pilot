@@ -708,6 +708,7 @@ async function scrapeProfilePanel(card, candidateName) {
 
   if (userId) {
     const settings = store.getSettings(userId);
+    console.log(`[profile] User settings for ${userId}: apiKey=${settings.phantombusterApiKey ? 'SET(' + settings.phantombusterApiKey.substring(0,6) + '...)' : 'EMPTY'}, cookie=${settings.linkedinLiAtCookie ? 'SET(' + settings.linkedinLiAtCookie.substring(0,10) + '...)' : 'EMPTY'}, phantomId=${settings.phantombusterPhantomId || 'EMPTY'}`);
     if (settings.phantombusterApiKey && settings.linkedinLiAtCookie) {
       pbConfig = {
         apiKey: settings.phantombusterApiKey,
