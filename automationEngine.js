@@ -1010,67 +1010,56 @@ async function openMessageCompose(card, candidateName) {
 
   let clicked = false;
 
-  // Approach 1: Use Playwright's getByRole with name matching "Message"
+  // Approach 1: Click the envelope icon button with tooltip "Send a message to a candidate"
+  // This is the icon in the profile action bar — NOT the top-nav "Messages" link
   try {
-    // Find all buttons, look for one starting with "Message "
     const messageBtn = await page.evaluateHandle(() => {
+      // Priority 1: button whose aria-label or title contains "send a message" (case-insensitive)
       const buttons = Array.from(document.querySelectorAll('button'));
-      return buttons.find(b => {
-        const text = b.textContent.trim();
-        return text.startsWith('Message ') && b.offsetParent !== null; // visible
-      }) || null;
-    });
-    
-    if (messageBtn && await messageBtn.evaluate(el => el !== null)) {
-      const btnText = await messageBtn.evaluate(el => el.textContent.trim().substring(0, 50));
-      console.log(`[compose] Found Message button: "${btnText}"`);
-      
-      // Validate button matches expected candidate (first name check)
-      if (candidateName) {
-        const firstName = candidateName.split(' ')[0];
-        if (!btnText.includes(firstName)) {
-          console.log(`[compose] ⚠ Name mismatch! Expected "${firstName}" but button says "${btnText}". Retrying...`);
-          // Try clicking the card name link again and wait longer
-          const retryLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
-          if (retryLink) {
-            await retryLink.click({ force: true });
-            await page.waitForTimeout(5000);
-          }
-          // Re-find the button
-          const retryBtn = await page.evaluateHandle(() => {
-            const buttons = Array.from(document.querySelectorAll('button'));
-            return buttons.find(b => b.textContent.trim().startsWith('Message ') && b.offsetParent !== null) || null;
-          });
-          if (retryBtn && await retryBtn.evaluate(el => el !== null)) {
-            const retryText = await retryBtn.evaluate(el => el.textContent.trim().substring(0, 50));
-            console.log(`[compose] Retry found: "${retryText}"`);
-            if (!retryText.includes(firstName)) {
-              throw new Error(`Profile panel shows wrong candidate: "${retryText}" (expected "${firstName}")`);
+      const match = buttons.find(b => {
+        const label = (b.getAttribute('aria-label') || '').toLowerCase();
+        const title = (b.getAttribute('title') || '').toLowerCase();
+        const tooltip = (b.getAttribute('data-tooltip') || '').toLowerCase();
+        return (label.includes('send a message') || label.includes('send message') ||
+                title.includes('send a message') || title.includes('send message') ||
+                tooltip.includes('send a message') || tooltip.includes('send message'))
+               && b.offsetParent !== null;
+      });
+      if (match) return match;
+
+      // Priority 2: icon button next to Archive button in the profile action bar
+      const archiveBtn = buttons.find(b => b.textContent.trim() === 'Archive' && b.offsetParent !== null);
+      if (archiveBtn) {
+        // Walk siblings after Archive looking for an icon-only button (envelope)
+        let sibling = archiveBtn.nextElementSibling;
+        while (sibling) {
+          if (sibling.tagName === 'BUTTON' || sibling.querySelector('button')) {
+            const btn = sibling.tagName === 'BUTTON' ? sibling : sibling.querySelector('button');
+            // Icon buttons typically have very short or empty text and contain an svg/icon
+            if (btn && btn.textContent.trim().length < 3 && btn.querySelector('svg, li-icon, [data-test-icon]')) {
+              return btn;
             }
-            await retryBtn.evaluate(el => { el.scrollIntoView({ block: 'center' }); });
-            await page.waitForTimeout(500);
-            await retryBtn.evaluate(el => el.click());
-            console.log('[compose] ✓ JS click on Message button executed (after retry)');
-            clicked = true;
           }
+          sibling = sibling.nextElementSibling;
         }
       }
-      
-      if (!clicked) {
-        // Click using JavaScript directly on the DOM element
-        await messageBtn.evaluate(el => {
-          el.scrollIntoView({ block: 'center' });
-        });
-        await page.waitForTimeout(500);
-        
-        // Try JS click first (most reliable for LinkedIn's Ember.js components)
-        await messageBtn.evaluate(el => el.click());
-        console.log('[compose] ✓ JS click on Message button executed');
-        clicked = true;
-      }
+
+      return null;
+    });
+
+    if (messageBtn && await messageBtn.evaluate(el => el !== null)) {
+      const desc = await messageBtn.evaluate(el =>
+        `aria-label="${el.getAttribute('aria-label') || ''}" title="${el.getAttribute('title') || ''}" text="${el.textContent.trim().substring(0, 30)}"`
+      );
+      console.log(`[compose] Found message icon button: ${desc}`);
+      await messageBtn.evaluate(el => { el.scrollIntoView({ block: 'center' }); });
+      await page.waitForTimeout(500);
+      await messageBtn.evaluate(el => el.click());
+      console.log('[compose] ✓ JS click on profile message icon executed');
+      clicked = true;
     }
   } catch (err) {
-    console.log(`[compose] Approach 1 (JS find+click) failed: ${err.message}`);
+    console.log(`[compose] Approach 1 (profile icon button) failed: ${err.message}`);
   }
 
   // Approach 2: Use Playwright's page.click with text selector
