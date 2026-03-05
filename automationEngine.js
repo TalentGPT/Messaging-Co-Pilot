@@ -1831,7 +1831,18 @@ async function closeBrowser() {
   }
 }
 
+function forceReset() {
+  stopRequested = false;
+  currentRun = null;
+  // Mark any "running" runs as stopped in the store
+  const latest = store.getLatestRun();
+  if (latest && latest.status === 'running') {
+    store.updateRun(latest.id, { status: 'stopped', endTime: new Date().toISOString() });
+    console.log(`[engine] Force-reset run ${latest.id} from "running" to "stopped"`);
+  }
+}
+
 module.exports = {
   runOutreach, approveCandidate, requestStop, getStatus,
-  launchBrowser, closeBrowser, setBroadcast, setSessionCookies,
+  launchBrowser, closeBrowser, setBroadcast, setSessionCookies, forceReset,
 };

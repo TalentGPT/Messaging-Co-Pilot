@@ -154,6 +154,7 @@ function broadcast(data) {
 }
 
 engine.setBroadcast(broadcast);
+engine.forceReset(); // Clear any stuck "running" state from previous crash
 
 // ── Serve static files ──
 app.use(express.static(path.join(__dirname, 'public')));
@@ -270,6 +271,12 @@ app.post('/api/campaigns/:id/generate-prompt', authMiddleware, async (req, res) 
     console.error('[generate-prompt] Error:', e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+// Force reset stuck run state
+app.post('/api/force-reset', authMiddleware, (req, res) => {
+  engine.forceReset();
+  res.json({ status: 'reset', message: 'Run state cleared' });
 });
 
 // ── Campaign Run (modified: auto-score, auto-regenerate if score < 70) ──
