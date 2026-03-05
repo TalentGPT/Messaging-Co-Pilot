@@ -724,7 +724,7 @@ async function scrapeProfilePanel(card, candidateName) {
   // Fall back to env vars / hardcoded defaults if no user settings
   if (!pbConfig) {
     const fallbackApiKey = process.env.PHANTOMBUSTER_API_KEY || 'IGXHv800hjAZbzDc4XzPnGFUXpznt9GqnTPmhrHpwAA';
-    const fallbackCookie = process.env.LINKEDIN_LI_AT_COOKIE || 'AQEDAQkORNAA5CYmAAABnL5joQEAAAGc4nAlAU4AyWOZ0Cl-5jRz2QLCx1rem2lTHfPbJhv3dZgSsaUx7H6_6398WqH_sMkr6v0R_yOPeEOgR3Qg_Bfc24ymASmtFLNkAnqVmV11aVtNZixicjO9zcTO';
+    const fallbackCookie = process.env.LINKEDIN_LI_AT_COOKIE || 'AQEDAQkORNACOHh0AAABnL7QZPwAAAGc4tzo_E4AiBSsewcf_oHkUu7bcVmTj4fP7Ar_BdZ5XrXxNXsNaw5-VIoAH99eLTlWWe6KKYPNxbQoRFHDDxOxqyf4tImHo1HCGU987TjzxciWfRFHxNnalYHm';
     const fallbackPhantomId = process.env.PHANTOMBUSTER_PROFILE_SCRAPER_ID || '6269753423088774';
     pbConfig = {
       apiKey: fallbackApiKey,
