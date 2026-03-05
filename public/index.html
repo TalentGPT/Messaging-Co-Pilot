@@ -800,6 +800,22 @@ function renderCandidate(c) {
 
   const msg = c.tuned_message || c.message || '';
   const msgHtml = msg ? `<div class="candidate-message">${escHtml(msg)}</div>` : '';
+
+  // Subject line options
+  const subjOpts = c.subjectOptions || [];
+  const selectedSubj = c.subject || '';
+  let subjectHtml = '';
+  if (subjOpts.length > 1) {
+    subjectHtml = `<div class="subject-picker" style="margin:8px 0;padding:8px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">📧 Subject Line:</div>
+      ${subjOpts.map((s, i) => `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0;font-size:13px">
+        <input type="radio" name="subj-${c.id}" value="${escHtml(s)}" ${s === selectedSubj ? 'checked' : ''} onchange="selectSubject('${c.id}', this.value)">
+        <span>${escHtml(s)}</span>
+      </label>`).join('')}
+    </div>`;
+  } else if (selectedSubj) {
+    subjectHtml = `<div style="font-size:12px;color:var(--accent);margin:4px 0">Subject: ${escHtml(selectedSubj)}</div>`;
+  }
   const errHtml = c.error ? `<div style="font-size:12px;color:var(--red);margin-top:4px">Error: ${escHtml(c.error)}</div>` : '';
 
   // Score display
@@ -866,6 +882,7 @@ function renderCandidate(c) {
       </div>
       ${signalTags ? `<div class="candidate-signals">${signalTags}</div>` : ''}
     </div>
+    ${subjectHtml}
     ${msgHtml}
     ${scoreHtml}
     ${errHtml}
@@ -951,13 +968,29 @@ async function submitImprove(id) {
 
 // ── Approve / Skip ──
 
+function selectSubject(id, subject) {
+  if (candidates[id]) {
+    candidates[id].subject = subject;
+    // Update in backend store too
+    fetch(`/api/candidates/${id}/subject`, {
+      method: 'PUT',
+      headers: { ...h(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject }),
+    }).catch(() => {});
+  }
+}
+
 async function approveCandidate(id) {
   const name = candidates[id]?.name || id;
   if (candidates[id]) { candidates[id].status = 'sending'; refreshCandidates(); }
   log(`📤 Sending message to ${name}...`, 'info');
   try {
     // Try new endpoint first, fall back to legacy
-    let resp = await fetch(`/api/candidates/${id}/approve`, { method: 'POST', headers: h() });
+    let resp = await fetch(`/api/candidates/${id}/approve`, {
+      method: 'POST',
+      headers: { ...h(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject: candidates[id]?.subject || '' }),
+    });
     if (resp.status === 404) {
       resp = await fetch(`/api/approve/${id}`, { method: 'POST', headers: h() });
     }
@@ -1173,7 +1206,7 @@ function handleEvent(msg) {
         candidates[msg.candidateId] = {
           ...(candidates[msg.candidateId] || {}),
           id: msg.candidateId, name: msg.name,
-          subject: msg.subject, tuned_message: msg.message, message: msg.original || msg.message,
+          subject: msg.subject, subjectOptions: msg.subjectOptions || [], tuned_message: msg.message, message: msg.original || msg.message,
           status: msg.status || 'dry_run',
           score: msg.score || null,
           replyProbability: msg.replyProbability || null,

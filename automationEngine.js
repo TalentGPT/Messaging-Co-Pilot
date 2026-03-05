@@ -923,12 +923,31 @@ async function scrapeProfilePanel(card, candidateName) {
 
 function parseRecruiterResponse(content) {
   let subject = '';
+  let subjectOptions = [];
   let body = content;
 
-  // Try to parse structured output: A) ... B) ... C) ...
+  // Format 1: "Subject Line Option 1\n...\nSubject Line Option 2\n...\nLinkedIn InMail\n..."
+  const slOpt1 = content.match(/Subject\s*Line\s*Option\s*1[:\s]*\n?\s*(.+)/i);
+  const slOpt2 = content.match(/Subject\s*Line\s*Option\s*2[:\s]*\n?\s*(.+)/i);
+  const inmailBody = content.match(/LinkedIn\s*InMail[:\s]*\n([\s\S]+)/i);
+
+  if (slOpt1 && inmailBody) {
+    subjectOptions.push(slOpt1[1].trim());
+    if (slOpt2) subjectOptions.push(slOpt2[1].trim());
+    subject = subjectOptions[0]; // default to first option
+    body = inmailBody[1].trim();
+    return { subject, subjectOptions, body };
+  }
+
+  // Format 2: "A) SUBJECT LINE OPTION 1 ... B) ... C) INMAIL BODY ..."
   const subjectMatch = content.match(/A\)\s*(?:SUBJECT LINE OPTION 1[^:\n]*[:\n]\s*)?(.+)/i);
   if (subjectMatch) {
-    subject = subjectMatch[1].trim();
+    subjectOptions.push(subjectMatch[1].trim());
+    subject = subjectOptions[0];
+  }
+  const subjectMatch2 = content.match(/B\)\s*(?:SUBJECT LINE OPTION 2[^:\n]*[:\n]\s*)?(.+)/i);
+  if (subjectMatch2) {
+    subjectOptions.push(subjectMatch2[1].trim());
   }
 
   const bodyMatch = content.match(/C\)\s*(?:INMAIL BODY[^:\n]*[:\n]\s*)?([\s\S]+)/i);
@@ -936,7 +955,7 @@ function parseRecruiterResponse(content) {
     body = bodyMatch[1].trim();
   }
 
-  return { subject, body };
+  return { subject, subjectOptions, body };
 }
 
 // Module-level variable for custom prompt (set per run)
@@ -954,24 +973,15 @@ async function generateMessage(candidateInfo) {
   const mode = process.env.OUTREACH_MODE || 'recruiter';
   const result = await generateOutreachMessage(candidateInfo, mode, _currentCustomPrompt);
 
-  // If using a custom prompt, return the raw response (don't parse with recruiter format)
-  if (_currentCustomPrompt) {
-    console.log(`[message] Custom prompt response (first 200 chars): ${result.message.substring(0, 200)}`);
-    // Try to extract subject if present, otherwise leave empty
+  // Parse all responses through the same parser (handles both custom and default prompt formats)
+  if (_currentCustomPrompt || mode === 'recruiter') {
+    console.log(`[message] Response (first 200 chars): ${result.message.substring(0, 200)}`);
     const parsed = parseRecruiterResponse(result.message);
+    console.log(`[message] Parsed: subject="${parsed.subject}", options=${JSON.stringify(parsed.subjectOptions)}, body=${parsed.body.length} chars`);
     return {
       subject: parsed.subject || '',
+      subjectOptions: parsed.subjectOptions || [],
       message: parsed.body || result.message,
-      profile: result.profile,
-    };
-  }
-
-  // Parse structured response for recruiter mode (default prompts only)
-  if (mode === 'recruiter') {
-    const parsed = parseRecruiterResponse(result.message);
-    return {
-      subject: parsed.subject,
-      message: parsed.body,
       profile: result.profile,
     };
   }
@@ -1491,6 +1501,7 @@ async function runOutreach(options = {}) {
 
         store.updateCandidate(candidateId, {
           subject: generated.subject,
+          subjectOptions: generated.subjectOptions || [],
           message: generated.message,
           tuned_message: tuned.message,
         });
@@ -1499,6 +1510,7 @@ async function runOutreach(options = {}) {
           candidateId,
           name: info.name,
           subject: tuned.subject || generated.subject,
+          subjectOptions: generated.subjectOptions || [],
           message: tuned.message,
           original: generated.message,
         });

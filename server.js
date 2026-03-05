@@ -538,9 +538,24 @@ app.post('/api/candidates/:id/improve', authMiddleware, async (req, res) => {
 
 // ── Candidate Approve (👍 — also logs positive signal) ──
 
+// Update subject line selection for a candidate
+app.put('/api/candidates/:id/subject', authMiddleware, (req, res) => {
+  const candidate = store.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
+  const { subject } = req.body || {};
+  store.updateCandidate(req.params.id, { subject: subject || '' });
+  res.json({ success: true });
+});
+
 app.post('/api/candidates/:id/approve', authMiddleware, async (req, res) => {
   const candidate = store.getCandidate(req.params.id);
   if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
+
+  // Allow subject override from request body
+  const bodySubject = req.body?.subject;
+  if (bodySubject !== undefined && bodySubject !== '') {
+    store.updateCandidate(req.params.id, { subject: bodySubject });
+  }
 
   const userId = candidate.userId || req.user.id;
   const campaignId = candidate.campaignId;
