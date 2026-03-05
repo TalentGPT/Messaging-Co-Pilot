@@ -708,12 +708,15 @@ async function scrapeProfilePanel(card, candidateName) {
 
   if (userId) {
     const settings = store.getSettings(userId);
-    console.log(`[profile] User settings for ${userId}: apiKey=${settings.phantombusterApiKey ? 'SET(' + settings.phantombusterApiKey.substring(0,6) + '...)' : 'EMPTY'}, cookie=${settings.linkedinLiAtCookie ? 'SET(' + settings.linkedinLiAtCookie.substring(0,10) + '...)' : 'EMPTY'}, phantomId=${settings.phantombusterPhantomId || 'EMPTY'}`);
-    if (settings.phantombusterApiKey && settings.linkedinLiAtCookie) {
+    // Only use UI settings if the li_at cookie looks valid (starts with AQEDA, not AQEFAR enterprise token)
+    const uiCookie = settings.linkedinLiAtCookie || '';
+    const cookieValid = uiCookie.startsWith('AQEDA');
+    console.log(`[profile] User settings for ${userId}: apiKey=${settings.phantombusterApiKey ? 'SET(' + settings.phantombusterApiKey.substring(0,6) + '...)' : 'EMPTY'}, cookie=${uiCookie ? uiCookie.substring(0,10) + '...' + (cookieValid ? ' ✓' : ' ✗ invalid prefix') : 'EMPTY'}, phantomId=${settings.phantombusterPhantomId || 'EMPTY'}`);
+    if (settings.phantombusterApiKey && cookieValid) {
       pbConfig = {
         apiKey: settings.phantombusterApiKey,
         phantomId: settings.phantombusterPhantomId || process.env.PHANTOMBUSTER_PROFILE_SCRAPER_ID || '',
-        liAtCookie: settings.linkedinLiAtCookie,
+        liAtCookie: uiCookie,
       };
     }
   }
