@@ -756,10 +756,11 @@ async function scrapeProfilePanel(card, candidateName) {
       }
 
       if (publicUrl) {
+        if (stopRequested) throw new Error('Stop requested');
         console.log(`[profile] Using PhantomBuster for: ${publicUrl}`);
         broadcast('status', { message: `Enriching ${candidateName} via PhantomBuster...` });
 
-        const enriched = await phantombuster.scrapeProfile(publicUrl, pbConfig);
+        const enriched = await phantombuster.scrapeProfile(publicUrl, { ...pbConfig, isStopRequested: () => stopRequested });
         if (enriched && (enriched.experiences?.length > 0 || enriched.summary || enriched.skills?.length > 0)) {
           console.log(`[profile] ✓ PhantomBuster enrichment successful for ${candidateName}`);
           return enriched;
@@ -1805,6 +1806,10 @@ async function approveCandidate(candidateId) {
 function requestStop() {
   stopRequested = true;
   broadcast('stop_requested', {});
+}
+
+function isStopRequested() {
+  return stopRequested;
 }
 
 function getStatus() {

@@ -68,7 +68,7 @@ async function launchProfileScrape(profileUrl, { apiKey, phantomId, liAtCookie }
  * Poll for phantom completion and fetch results.
  * Returns the scraped profile data or null on failure.
  */
-async function waitForResults(phantomId, { apiKey, containerId, timeoutMs = 90000 } = {}) {
+async function waitForResults(phantomId, { apiKey, containerId, timeoutMs = 90000, isStopRequested } = {}) {
   const key = apiKey || DEFAULT_API_KEY;
   const id = phantomId || DEFAULT_PHANTOM_ID;
   const startTime = Date.now();
@@ -134,6 +134,11 @@ async function waitForResults(phantomId, { apiKey, containerId, timeoutMs = 9000
 
       console.log(`[phantombuster] Finished but no parseable results. Status: ${output.status}, hasResultObject: ${!!output.resultObject}, hasS3: ${!!output.s3Folder}`);
       return null;
+    }
+
+    // Check if stop was requested
+    if (isStopRequested && isStopRequested()) {
+      throw new Error('Stop requested — aborting PhantomBuster poll');
     }
 
     // Still running — wait and poll again
@@ -310,6 +315,7 @@ async function scrapeProfile(profileUrl, config = {}) {
       apiKey: config.apiKey,
       containerId: launch.containerId,
       timeoutMs: config.timeoutMs || 90000,
+      isStopRequested: config.isStopRequested,
     });
 
     if (!results) {
