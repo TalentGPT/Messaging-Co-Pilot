@@ -734,6 +734,9 @@ async function scrapeProfilePanel(card, candidateName) {
   }
 
   // Strategy 1: PhantomBuster (if configured)
+  if (pbConfig) {
+    console.log(`[profile] PB config: cookie=${pbConfig.liAtCookie.substring(0,10)}..., phantomId=${pbConfig.phantomId}`);
+  }
   if (pbConfig && pbConfig.apiKey && pbConfig.liAtCookie && pbConfig.phantomId) {
     try {
       // Get the public /in/ URL
