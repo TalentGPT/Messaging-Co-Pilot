@@ -323,6 +323,41 @@
           <span id="cookie-save-status" style="font-size:12px;color:var(--green);opacity:0;transition:opacity .3s"></span>
         </div>
       </div>
+
+      <!-- PhantomBuster Configuration -->
+      <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:16px">
+        <h2 style="margin-bottom:4px">👻 PhantomBuster <span id="pb-status-badge" class="badge badge-gray">Not configured</span></h2>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 12px">
+          Enables rich LinkedIn profile scraping for better message personalization. Each user configures their own credentials.
+        </p>
+
+        <label>PhantomBuster API Key</label>
+        <div style="display:flex;gap:8px;align-items:flex-start">
+          <input id="pb-api-key" type="password" placeholder="Your PhantomBuster API key" style="flex:1;margin-bottom:8px">
+          <button class="btn-sm btn-outline" onclick="togglePbKeyVisibility()" style="margin-top:2px" title="Show/hide">👁</button>
+        </div>
+
+        <label>Profile Scraper Phantom ID</label>
+        <input id="pb-phantom-id" placeholder="e.g. 6269753423088774">
+        <p style="font-size:11px;color:var(--muted);margin:-8px 0 12px">
+          The ID of your LinkedIn Profile Scraper phantom. Click "Detect" to auto-find it.
+        </p>
+
+        <label>LinkedIn li_at Cookie</label>
+        <input id="pb-li-at" type="password" placeholder="Your LinkedIn li_at session cookie">
+        <p style="font-size:11px;color:var(--muted);margin:-8px 0 12px">
+          Chrome → F12 → Application → Cookies → linkedin.com → copy the <code>li_at</code> value. Refresh when expired.
+        </p>
+
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn-sm btn-green" onclick="savePbSettings()">💾 Save Settings</button>
+          <button class="btn-sm btn-primary" onclick="testPbConnection()">🔌 Test Connection</button>
+          <button class="btn-sm btn-outline" onclick="detectPbPhantom()">🔍 Detect Phantom</button>
+          <span id="pb-save-status" style="font-size:12px;color:var(--green);opacity:0;transition:opacity .3s"></span>
+        </div>
+
+        <div id="pb-test-result" class="hidden" style="margin-top:12px;padding:12px;border-radius:8px;font-size:13px;border:1px solid var(--border);background:var(--bg)"></div>
+      </div>
     </div>
   </div>
 
@@ -397,6 +432,7 @@ function showDashboard() {
   document.getElementById('user-display').textContent = `👤 ${currentUser.username}`;
   loadCampaigns();
   loadCookieUsers();
+  loadPbSettings();
   pollStatus();
   connectWs();
 }
@@ -995,6 +1031,106 @@ async function activateCookie(name) {
 async function deleteCookie(name) {
   if (!confirm(`Delete session for "${name}"?`)) return;
   try { await fetch(`/api/cookies/${encodeURIComponent(name)}`, { method: 'DELETE', headers: h() }); loadCookieUsers(); } catch (e) { alert(e.message); }
+}
+
+// ── PhantomBuster Settings ──
+
+async function loadPbSettings() {
+  try {
+    const resp = await fetch('/api/settings', { headers: h() });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const badge = document.getElementById('pb-status-badge');
+
+    // Show masked values if they exist
+    if (data._hasPhantombusterApiKey) {
+      document.getElementById('pb-api-key').placeholder = data.phantombusterApiKey || 'Configured ✓';
+    }
+    if (data.phantombusterPhantomId) {
+      document.getElementById('pb-phantom-id').value = data.phantombusterPhantomId;
+    }
+    if (data._hasLinkedinLiAtCookie) {
+      document.getElementById('pb-li-at').placeholder = data.linkedinLiAtCookie || 'Configured ✓';
+    }
+
+    // Update badge
+    if (data._hasPhantombusterApiKey && data._hasLinkedinLiAtCookie && data.phantombusterPhantomId) {
+      badge.textContent = 'Configured'; badge.className = 'badge badge-green';
+    } else if (data._hasPhantombusterApiKey) {
+      badge.textContent = 'Partial'; badge.className = 'badge badge-yellow';
+    } else {
+      badge.textContent = 'Not configured'; badge.className = 'badge badge-gray';
+    }
+  } catch (e) { console.error('Failed to load PB settings:', e); }
+}
+
+async function savePbSettings() {
+  const apiKey = document.getElementById('pb-api-key').value.trim();
+  const phantomId = document.getElementById('pb-phantom-id').value.trim();
+  const liAt = document.getElementById('pb-li-at').value.trim();
+
+  const updates = {};
+  if (apiKey) updates.phantombusterApiKey = apiKey;
+  if (phantomId) updates.phantombusterPhantomId = phantomId;
+  if (liAt) updates.linkedinLiAtCookie = liAt;
+
+  if (Object.keys(updates).length === 0) { alert('Enter at least one field to save'); return; }
+
+  try {
+    const resp = await fetch('/api/settings', { method: 'PUT', headers: h(), body: JSON.stringify(updates) });
+    const data = await resp.json();
+    if (data.error) { alert(data.error); return; }
+    const s = document.getElementById('pb-save-status');
+    s.textContent = `✓ Saved (${data.fields.join(', ')})`; s.style.opacity = 1; setTimeout(() => s.style.opacity = 0, 3000);
+    // Clear sensitive inputs after save
+    document.getElementById('pb-api-key').value = '';
+    document.getElementById('pb-li-at').value = '';
+    loadPbSettings();
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function testPbConnection() {
+  const resultDiv = document.getElementById('pb-test-result');
+  resultDiv.classList.remove('hidden');
+  resultDiv.innerHTML = '<span style="color:var(--muted)">🔄 Testing connection...</span>';
+
+  try {
+    const resp = await fetch('/api/settings/test-phantombuster', { method: 'POST', headers: h() });
+    const data = await resp.json();
+    if (data.error) {
+      resultDiv.innerHTML = `<span style="color:var(--red)">❌ ${escHtml(data.error)}</span>`;
+      return;
+    }
+    let html = `<span style="color:var(--green)">✅ Connected!</span> ${data.totalPhantoms} phantom(s) found.<br>`;
+    if (data.profileScrapers && data.profileScrapers.length > 0) {
+      html += '<br><strong>Profile Scrapers detected:</strong><br>';
+      data.profileScrapers.forEach(p => {
+        html += `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
+          <code style="font-size:12px;color:var(--accent)">${escHtml(p.id)}</code>
+          <span>${escHtml(p.name)}</span>
+          <button class="btn-sm btn-outline" onclick="document.getElementById('pb-phantom-id').value='${escHtml(p.id)}'">Use This</button>
+        </div>`;
+      });
+    } else {
+      html += '<br><span style="color:var(--yellow)">⚠️ No LinkedIn Profile Scraper phantom found. Create one at phantombuster.com first.</span>';
+    }
+    resultDiv.innerHTML = html;
+  } catch (e) {
+    resultDiv.innerHTML = `<span style="color:var(--red)">❌ ${escHtml(e.message)}</span>`;
+  }
+}
+
+async function detectPbPhantom() {
+  const resultDiv = document.getElementById('pb-test-result');
+  resultDiv.classList.remove('hidden');
+  resultDiv.innerHTML = '<span style="color:var(--muted)">🔍 Detecting Profile Scraper phantom...</span>';
+  // Re-use test connection which returns profile scrapers
+  await testPbConnection();
+}
+
+function togglePbKeyVisibility() {
+  const input = document.getElementById('pb-api-key');
+  input.type = input.type === 'password' ? 'text' : 'password';
 }
 
 // ── WebSocket ──
