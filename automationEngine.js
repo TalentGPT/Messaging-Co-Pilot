@@ -1713,45 +1713,103 @@ async function approveCandidate(candidateId) {
 
     await takeScreenshot('approve-profile-loaded');
 
-    // Find and click message button — try multiple strategies for Recruiter profile page
-    let msgBtn = await trySelector(page, SELECTORS.messageButton, { timeout: 5000 });
+    // Find and click the envelope/mail icon button next to "Archive" on the profile action bar
+    let msgBtn = null;
 
-    // Strategy 2: JS-based search for any button containing "Message" text (Recruiter profile pages)
-    if (!msgBtn) {
-      console.log('[approve] Standard selectors failed, trying JS button search...');
-      const found = await page.evaluateHandle(() => {
-        const buttons = Array.from(document.querySelectorAll('button, a'));
-        return buttons.find(b => {
-          const text = b.textContent.trim();
-          return (text.startsWith('Message ') || text === 'Message' || text === 'InMail' || text.startsWith('InMail '))
-            && b.offsetParent !== null;
-        }) || null;
-      });
-      if (found && await found.evaluate(el => el !== null)) {
-        const btnText = await found.evaluate(el => el.textContent.trim().substring(0, 50));
-        console.log(`[approve] Found via JS search: "${btnText}"`);
-        msgBtn = found;
-      }
+    // Strategy 1: Button with aria-label/title about sending a message
+    msgBtn = await page.evaluateHandle(() => {
+      const buttons = Array.from(document.querySelectorAll('button'));
+      return buttons.find(b => {
+        const label = (b.getAttribute('aria-label') || '').toLowerCase();
+        const title = (b.getAttribute('title') || '').toLowerCase();
+        const tooltip = (b.getAttribute('data-tooltip') || '').toLowerCase();
+        return (label.includes('send a message') || label.includes('send message') ||
+                title.includes('send a message') || title.includes('send message') ||
+                tooltip.includes('send a message') || tooltip.includes('send message'))
+               && b.offsetParent !== null;
+      }) || null;
+    });
+    if (msgBtn && await msgBtn.evaluate(el => el !== null)) {
+      console.log('[approve] Found message button via aria-label/title');
+    } else {
+      msgBtn = null;
     }
 
-    // Strategy 3: Look for the mail/envelope icon SVG and click its parent button
+    // Strategy 2: Find the envelope icon button next to Archive button
     if (!msgBtn) {
-      console.log('[approve] Trying envelope icon search...');
-      const iconBtn = await page.evaluateHandle(() => {
-        const svgs = Array.from(document.querySelectorAll('svg[data-test-icon*="send"], svg[data-test-icon*="mail"], svg[data-test-icon*="message"], li-icon[type*="mail"], li-icon[type*="message"]'));
-        for (const svg of svgs) {
-          const btn = svg.closest('button') || svg.closest('a');
-          if (btn && btn.offsetParent !== null) return btn;
+      console.log('[approve] Trying Archive-sibling icon search...');
+      msgBtn = await page.evaluateHandle(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const archiveBtn = buttons.find(b => b.textContent.trim() === 'Archive' && b.offsetParent !== null);
+        if (!archiveBtn) return null;
+        // Look at siblings after Archive — the envelope icon is the first icon button
+        let sibling = archiveBtn.nextElementSibling;
+        while (sibling) {
+          const btn = sibling.tagName === 'BUTTON' ? sibling : sibling.querySelector('button');
+          if (btn && btn.offsetParent !== null && btn.querySelector('svg, li-icon, [data-test-icon]')) {
+            return btn;
+          }
+          sibling = sibling.nextElementSibling;
+        }
+        // Also check parent's children in case they're wrapped in containers
+        const parent = archiveBtn.closest('.profile-actions, [class*="action"], [class*="toolbar"]') || archiveBtn.parentElement;
+        if (parent) {
+          const iconBtns = parent.querySelectorAll('button');
+          for (const ib of iconBtns) {
+            if (ib !== archiveBtn && ib.offsetParent !== null && ib.querySelector('svg, li-icon, [data-test-icon]')) {
+              const text = ib.textContent.trim();
+              // Skip buttons with long text (those are text buttons, not icon buttons)
+              if (text.length < 5) return ib;
+            }
+          }
         }
         return null;
       });
-      if (iconBtn && await iconBtn.evaluate(el => el !== null)) {
-        console.log('[approve] Found message button via envelope icon');
-        msgBtn = iconBtn;
+      if (msgBtn && await msgBtn.evaluate(el => el !== null)) {
+        console.log('[approve] Found message button next to Archive');
+      } else {
+        msgBtn = null;
+      }
+    }
+
+    // Strategy 3: Any button/link containing envelope SVG anywhere on page
+    if (!msgBtn) {
+      console.log('[approve] Trying broad SVG icon search...');
+      msgBtn = await page.evaluateHandle(() => {
+        // Look for any SVG that looks like a mail/message icon
+        const allSvgs = Array.from(document.querySelectorAll('svg, li-icon'));
+        for (const svg of allSvgs) {
+          const type = (svg.getAttribute('type') || '').toLowerCase();
+          const testIcon = (svg.getAttribute('data-test-icon') || '').toLowerCase();
+          const ariaLabel = (svg.getAttribute('aria-label') || '').toLowerCase();
+          if (type.includes('mail') || type.includes('message') || type.includes('send') ||
+              testIcon.includes('mail') || testIcon.includes('message') || testIcon.includes('send') ||
+              ariaLabel.includes('mail') || ariaLabel.includes('message')) {
+            const btn = svg.closest('button') || svg.closest('a');
+            if (btn && btn.offsetParent !== null) return btn;
+          }
+        }
+        return null;
+      });
+      if (msgBtn && await msgBtn.evaluate(el => el !== null)) {
+        console.log('[approve] Found message button via SVG icon');
+      } else {
+        msgBtn = null;
       }
     }
 
     if (!msgBtn) {
+      // Log what buttons exist near Archive for debugging
+      await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const archiveBtn = buttons.find(b => b.textContent.trim() === 'Archive');
+        if (archiveBtn && archiveBtn.parentElement) {
+          const siblings = archiveBtn.parentElement.children;
+          console.log('[debug] Archive parent children:', Array.from(siblings).map(s =>
+            `<${s.tagName} class="${s.className}" text="${s.textContent.trim().substring(0,30)}">`
+          ));
+        }
+      });
       await takeScreenshot('approve-no-message-button');
       throw new Error('Could not find Message button on Recruiter profile page');
     }
@@ -1761,8 +1819,26 @@ async function approveCandidate(candidateId) {
     await page.waitForTimeout(300);
     await msgBtn.evaluate(el => el.click());
     console.log('[approve] ✓ Message button clicked');
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(4000);
     await takeScreenshot('approve-after-message-click');
+
+    // Wait for compose dialog to appear — look for subject input, message body, or any new modal/dialog
+    console.log('[approve] Waiting for compose dialog...');
+    let composeReady = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const found = await page.$('input[name="subject"], input[placeholder*="ubject"], div[contenteditable="true"], textarea, [role="textbox"], [role="dialog"], [class*="compose"], [class*="inmail"]');
+      if (found && await found.isVisible().catch(() => false)) {
+        console.log('[approve] ✓ Compose dialog detected');
+        composeReady = true;
+        break;
+      }
+      console.log(`[approve] Compose dialog not ready, waiting... (attempt ${attempt + 1}/5)`);
+      await page.waitForTimeout(2000);
+    }
+    if (!composeReady) {
+      await takeScreenshot('approve-compose-not-found');
+      console.log('[approve] ⚠ Compose dialog not detected after 10s — proceeding anyway');
+    }
 
     const subject = candidate.subject;
     const message = candidate.tuned_message || candidate.message;
