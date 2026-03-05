@@ -623,6 +623,204 @@ async function extractCandidateInfo(card) {
   return info;
 }
 
+// ── Profile panel scraping ──
+
+async function scrapeProfilePanel(card, candidateName) {
+  console.log(`[profile] Scraping profile panel for: ${candidateName}...`);
+  const profileData = {
+    location: '',
+    industry: '',
+    summary: '',
+    experiences: [],
+    education: [],
+    skills: [],
+  };
+
+  try {
+    // Click candidate name to open profile panel
+    const nameLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
+    if (!nameLink) {
+      console.log('[profile] No name link found — skipping profile scrape');
+      return profileData;
+    }
+
+    await nameLink.click({ force: true });
+    await page.waitForTimeout(3000);
+
+    // Scrape the profile panel using page.evaluate for speed
+    const scraped = await page.evaluate(() => {
+      const data = {
+        location: '',
+        industry: '',
+        summary: '',
+        experiences: [],
+        education: [],
+        skills: [],
+      };
+
+      // Helper: get text from first matching selector
+      const getText = (selectors, context = document) => {
+        for (const sel of selectors) {
+          const el = context.querySelector(sel);
+          if (el && el.innerText.trim()) return el.innerText.trim();
+        }
+        return '';
+      };
+
+      // Location — LinkedIn Recruiter profile panels
+      data.location = getText([
+        '[data-test-candidate-location]',
+        '.artdeco-entity-lockup__caption',
+        '[class*="location"]',
+        '[class*="geo"]',
+        'span[class*="locality"]',
+      ]);
+
+      // Summary / About section
+      data.summary = getText([
+        '[class*="summary"] [class*="content"]',
+        '[class*="about"] [class*="content"]',
+        '[data-test-summary]',
+        'section[class*="summary"] p',
+        'section[class*="about"] p',
+        '[class*="profile-summary"]',
+        '[class*="summary-text"]',
+      ]);
+
+      // Experience section — find all experience entries
+      const expSelectors = [
+        '[class*="experience"] li',
+        '[class*="experience-section"] li',
+        'section[class*="experience"] [class*="entity"]',
+        '[data-test-experience] li',
+        '[class*="positions"] li',
+        '[class*="experience"] [class*="item"]',
+        '[class*="experience"] [class*="entry"]',
+      ];
+
+      for (const sel of expSelectors) {
+        const entries = document.querySelectorAll(sel);
+        if (entries.length > 0) {
+          entries.forEach(entry => {
+            const title = getText([
+              '[class*="title"]',
+              '[data-test-position-title]',
+              'h3',
+              'span[class*="title"]',
+            ], entry);
+            const company = getText([
+              '[class*="company"]',
+              '[data-test-company-name]',
+              '[class*="subtitle"]',
+              'h4',
+              'span[class*="company"]',
+            ], entry);
+            const date = getText([
+              '[class*="date-range"]',
+              '[class*="dates"]',
+              'span[class*="date"]',
+              '[class*="time-period"]',
+              'time',
+            ], entry);
+            const location = getText([
+              '[class*="location"]',
+              '[class*="geo"]',
+            ], entry);
+            const description = getText([
+              '[class*="description"]',
+              '[class*="show-more"]',
+              'p',
+            ], entry);
+
+            if (title || company) {
+              data.experiences.push({ title, company, date, location, description: description.substring(0, 500) });
+            }
+          });
+          break; // Found entries, stop trying selectors
+        }
+      }
+
+      // Education section
+      const eduSelectors = [
+        '[class*="education"] li',
+        '[class*="education-section"] li',
+        'section[class*="education"] [class*="entity"]',
+        '[data-test-education] li',
+        '[class*="education"] [class*="item"]',
+        '[class*="education"] [class*="entry"]',
+      ];
+
+      for (const sel of eduSelectors) {
+        const entries = document.querySelectorAll(sel);
+        if (entries.length > 0) {
+          entries.forEach(entry => {
+            const school = getText(['[class*="school"]', '[class*="name"]', 'h3', 'span:first-child'], entry);
+            const degree = getText(['[class*="degree"]', '[class*="field"]', 'h4', 'span[class*="subtitle"]'], entry);
+            const date = getText(['[class*="date"]', 'time', 'span[class*="date"]'], entry);
+            if (school) {
+              data.education.push({ school, degree, date });
+            }
+          });
+          break;
+        }
+      }
+
+      // Skills section
+      const skillSelectors = [
+        '[class*="skill"] [class*="name"]',
+        '[class*="skills"] li',
+        '[data-test-skill]',
+        '[class*="skill-badge"]',
+        '[class*="skill"] span',
+      ];
+
+      for (const sel of skillSelectors) {
+        const entries = document.querySelectorAll(sel);
+        if (entries.length > 0) {
+          entries.forEach(entry => {
+            const text = entry.innerText.trim();
+            if (text && text.length < 100) data.skills.push(text);
+          });
+          break;
+        }
+      }
+
+      return data;
+    });
+
+    Object.assign(profileData, scraped);
+
+    // Log what we found
+    const stats = [];
+    if (profileData.location) stats.push(`location: ${profileData.location.substring(0, 40)}`);
+    if (profileData.summary) stats.push(`summary: ${profileData.summary.length} chars`);
+    if (profileData.experiences.length) stats.push(`${profileData.experiences.length} experiences`);
+    if (profileData.education.length) stats.push(`${profileData.education.length} education`);
+    if (profileData.skills.length) stats.push(`${profileData.skills.length} skills`);
+    console.log(`[profile] ✓ Scraped: ${stats.length > 0 ? stats.join(', ') : 'minimal data only'}`);
+
+    // Close the profile panel by clicking back/elsewhere to return to pipeline view
+    // Try pressing Escape or clicking back button
+    try {
+      const backBtn = await page.$('button[aria-label="Back"], button[aria-label="Close"], [data-test-back-button]');
+      if (backBtn) {
+        await backBtn.click();
+        await page.waitForTimeout(1000);
+      } else {
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(1000);
+      }
+    } catch (e) {
+      console.log(`[profile] Note: could not close panel (${e.message}) — continuing`);
+    }
+
+  } catch (err) {
+    console.log(`[profile] Scrape failed for ${candidateName}: ${err.message} — continuing with basic info`);
+  }
+
+  return profileData;
+}
+
 // ── Message generation ──
 
 function parseRecruiterResponse(content) {
@@ -1160,6 +1358,11 @@ async function runOutreach(options = {}) {
 
         console.log(`[run] Processing ${processed + 1}/${maxCandidates}: ${info.name}`);
         broadcast('processing_candidate', { index: processed + 1, total: maxCandidates, name: info.name });
+
+        // Scrape full profile data from the profile panel
+        const profileData = await scrapeProfilePanel(card, info.name);
+        // Merge scraped profile data into candidate info for richer message generation
+        info = { ...info, ...profileData };
 
         candidateId = store.createCandidate({ ...info, run_mode: runMode, userId: _currentUserId, campaignId: _currentCampaignId });
 
