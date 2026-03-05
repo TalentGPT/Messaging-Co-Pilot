@@ -708,9 +708,9 @@ async function scrapeProfilePanel(card, candidateName) {
 
   if (userId) {
     const settings = store.getSettings(userId);
-    // Only use UI settings if the li_at cookie looks valid (starts with AQEDA, not AQEFAR enterprise token)
+    // Only use UI settings if the li_at cookie looks valid (starts with AQED, not AQEFAR enterprise token)
     const uiCookie = settings.linkedinLiAtCookie || '';
-    const cookieValid = uiCookie.startsWith('AQEDA');
+    const cookieValid = uiCookie.startsWith('AQED') && !uiCookie.startsWith('AQEFAR');
     console.log(`[profile] User settings for ${userId}: apiKey=${settings.phantombusterApiKey ? 'SET(' + settings.phantombusterApiKey.substring(0,6) + '...)' : 'EMPTY'}, cookie=${uiCookie ? uiCookie.substring(0,10) + '...' + (cookieValid ? ' ✓' : ' ✗ invalid prefix') : 'EMPTY'}, phantomId=${settings.phantombusterPhantomId || 'EMPTY'}`);
     if (settings.phantombusterApiKey && cookieValid) {
       pbConfig = {
