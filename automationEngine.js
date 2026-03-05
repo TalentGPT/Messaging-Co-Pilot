@@ -700,6 +700,14 @@ async function openMessageCompose(card, candidateName) {
   await page.waitForTimeout(4000);
   await takeScreenshot('profile-panel-opened');
 
+  // Dismiss any open notification dropdown or overlay that intercepts clicks
+  await page.evaluate(() => {
+    const notif = document.querySelector('[data-test-notifications-dropdown-trigger][aria-expanded="true"], .notifications-menu--is-open');
+    if (notif) notif.click();
+    document.body.click();
+  });
+  await page.waitForTimeout(500);
+
   // STEP 2: Find and click the "Message" button using Playwright's text matching
   // The button text is "Message [FirstName] [LastName]" — it's the envelope icon
   console.log('[compose] Looking for Message button in profile panel...');
@@ -1376,10 +1384,21 @@ async function approveCandidate(candidateId) {
       await page.waitForTimeout(2000);
     }
 
+    // Dismiss any open notification dropdown or overlay that intercepts clicks
+    await page.evaluate(() => {
+      const notif = document.querySelector('[data-test-notifications-dropdown-trigger][aria-expanded="true"], .notifications-menu--is-open');
+      if (notif) notif.click();
+      document.body.click();
+    });
+    await page.waitForTimeout(500);
+
     // Find and click message button
     const msgBtn = await trySelector(page, SELECTORS.messageButton, { timeout: 8000 });
     if (!msgBtn) throw new Error('Could not find Message button');
-    await msgBtn.click();
+    // Use JS click to avoid pointer interception from nav overlays
+    await msgBtn.evaluate(el => { el.scrollIntoView({ block: 'center' }); });
+    await page.waitForTimeout(300);
+    await msgBtn.evaluate(el => el.click());
     await page.waitForTimeout(2000);
 
     const subject = candidate.subject;
