@@ -18,6 +18,7 @@ let broadcastFn = () => {};
 let _sessionCookies = null;  // LinkedIn cookies from UI
 let _currentUserId = null;
 let _currentCampaignId = null;
+let _pbDisabledThisRun = false; // Auto-disable PhantomBuster after cookie expiry
 
 function setBroadcast(fn) { broadcastFn = fn; }
 
@@ -733,7 +734,11 @@ async function scrapeProfilePanel(card, candidateName) {
     };
   }
 
-  // Strategy 1: PhantomBuster (if configured)
+  // Strategy 1: PhantomBuster (if configured and not disabled this run)
+  if (_pbDisabledThisRun && pbConfig) {
+    console.log('[profile] PhantomBuster disabled this run (cookie expired) — using DOM scraping');
+    pbConfig = null;
+  }
   if (pbConfig) {
     console.log(`[profile] PB config: cookie=${pbConfig.liAtCookie.substring(0,10)}..., phantomId=${pbConfig.phantomId}`);
   }
@@ -765,12 +770,16 @@ async function scrapeProfilePanel(card, candidateName) {
           console.log(`[profile] ✓ PhantomBuster enrichment successful for ${candidateName}`);
           return enriched;
         }
-        console.log(`[profile] PhantomBuster returned minimal data — falling back to DOM scraping`);
+        console.log('[profile] PhantomBuster returned minimal data — falling back to DOM scraping');
       } else {
         console.log(`[profile] No public /in/ URL found — falling back to DOM scraping`);
       }
     } catch (err) {
       console.log(`[profile] PhantomBuster failed: ${err.message} — falling back to DOM scraping`);
+      if (err.message.includes('cookie') || err.message.includes('credentials') || err.message.includes('Session')) {
+        _pbDisabledThisRun = true;
+        console.log('[profile] ⚠ PhantomBuster disabled for remainder of this run (cookie issue)');
+      }
     }
   } else {
     if (pbConfig && !pbConfig.phantomId) {
@@ -1375,6 +1384,7 @@ async function runOutreach(options = {}) {
   _currentCampaignId = campaignId;
 
   stopRequested = false;
+  _pbDisabledThisRun = false;
   const runId = store.createRun(projectUrl, runMode, maxCandidates, userId, campaignId);
   currentRun = runId;
 
