@@ -68,7 +68,7 @@ async function launchProfileScrape(profileUrl, { apiKey, phantomId, liAtCookie }
  * Poll for phantom completion and fetch results.
  * Returns the scraped profile data or null on failure.
  */
-async function waitForResults(phantomId, { apiKey, timeoutMs = 90000 } = {}) {
+async function waitForResults(phantomId, { apiKey, containerId, timeoutMs = 90000 } = {}) {
   const key = apiKey || DEFAULT_API_KEY;
   const id = phantomId || DEFAULT_PHANTOM_ID;
   const startTime = Date.now();
@@ -79,7 +79,20 @@ async function waitForResults(phantomId, { apiKey, timeoutMs = 90000 } = {}) {
       headers: { 'X-Phantombuster-Key': key },
     });
 
+    // Make sure we're looking at OUR container's results, not a stale previous run
+    if (containerId && output.containerId && String(output.containerId) !== String(containerId)) {
+      // Still showing old run results — wait for our container to finish
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      continue;
+    }
+
     if (output.status === 'finished' || output.status === 'error') {
+      // Check output for errors first
+      if (output.output && output.output.includes('❌')) {
+        const errorMatch = output.output.match(/❌\s*(.+)/);
+        throw new Error(`PhantomBuster error: ${errorMatch ? errorMatch[1] : 'Unknown error'}`);
+      }
+
       if (output.resultObject) {
         try {
           const parsed = JSON.parse(output.resultObject);
@@ -89,7 +102,7 @@ async function waitForResults(phantomId, { apiKey, timeoutMs = 90000 } = {}) {
         }
       }
 
-      // Try to get the output CSV URL
+      // Try to get the output from S3
       if (output.s3Folder) {
         try {
           const csvData = await fetchOutputCSV(id, key);
@@ -101,12 +114,25 @@ async function waitForResults(phantomId, { apiKey, timeoutMs = 90000 } = {}) {
         }
       }
 
-      // Check output for errors
-      if (output.output && output.output.includes('❌')) {
-        const errorMatch = output.output.match(/❌\s*(.+)/);
-        throw new Error(`PhantomBuster error: ${errorMatch ? errorMatch[1] : 'Unknown error'}`);
+      // Check output text for JSON/CSV URLs and fetch directly
+      if (output.output) {
+        const jsonUrlMatch = output.output.match(/JSON saved at (https:\/\/\S+)/);
+        if (jsonUrlMatch) {
+          try {
+            const fetchFn = globalThis.fetch || (await import('node-fetch')).default;
+            const res = await fetchFn(jsonUrlMatch[1]);
+            if (res.ok) {
+              const data = await res.json();
+              console.log(`[phantombuster] ✓ Fetched results from S3 JSON URL`);
+              return data;
+            }
+          } catch (e) {
+            console.log(`[phantombuster] Direct JSON URL fetch failed: ${e.message}`);
+          }
+        }
       }
 
+      console.log(`[phantombuster] Finished but no parseable results. Status: ${output.status}, hasResultObject: ${!!output.resultObject}, hasS3: ${!!output.s3Folder}`);
       return null;
     }
 
@@ -278,10 +304,11 @@ async function scrapeProfile(profileUrl, config = {}) {
       return launch.data;
     }
 
-    // Wait for results
+    // Wait for results — pass containerId to ensure we get THIS run's output
     console.log(`[phantombuster] Waiting for results (container: ${launch.containerId})...`);
     const results = await waitForResults(config.phantomId, {
       apiKey: config.apiKey,
+      containerId: launch.containerId,
       timeoutMs: config.timeoutMs || 90000,
     });
 
