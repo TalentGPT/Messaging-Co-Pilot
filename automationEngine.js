@@ -1010,56 +1010,59 @@ async function openMessageCompose(card, candidateName) {
 
   let clicked = false;
 
-  // Approach 1: Click the envelope icon button with tooltip "Send a message to a candidate"
-  // This is the icon in the profile action bar — NOT the top-nav "Messages" link
+  // Approach 1: Find button with text "Message [Name]" — this is the compose button
+  // Do NOT click the envelope icon (that navigates to Messages inbox)
   try {
     const messageBtn = await page.evaluateHandle(() => {
-      // Priority 1: button whose aria-label or title contains "send a message" (case-insensitive)
       const buttons = Array.from(document.querySelectorAll('button'));
-      const match = buttons.find(b => {
-        const label = (b.getAttribute('aria-label') || '').toLowerCase();
-        const title = (b.getAttribute('title') || '').toLowerCase();
-        const tooltip = (b.getAttribute('data-tooltip') || '').toLowerCase();
-        return (label.includes('send a message') || label.includes('send message') ||
-                title.includes('send a message') || title.includes('send message') ||
-                tooltip.includes('send a message') || tooltip.includes('send message'))
-               && b.offsetParent !== null;
-      });
-      if (match) return match;
-
-      // Priority 2: icon button next to Archive button in the profile action bar
-      const archiveBtn = buttons.find(b => b.textContent.trim() === 'Archive' && b.offsetParent !== null);
-      if (archiveBtn) {
-        // Walk siblings after Archive looking for an icon-only button (envelope)
-        let sibling = archiveBtn.nextElementSibling;
-        while (sibling) {
-          if (sibling.tagName === 'BUTTON' || sibling.querySelector('button')) {
-            const btn = sibling.tagName === 'BUTTON' ? sibling : sibling.querySelector('button');
-            // Icon buttons typically have very short or empty text and contain an svg/icon
-            if (btn && btn.textContent.trim().length < 3 && btn.querySelector('svg, li-icon, [data-test-icon]')) {
-              return btn;
-            }
-          }
-          sibling = sibling.nextElementSibling;
-        }
-      }
-
-      return null;
+      return buttons.find(b => {
+        const text = b.textContent.trim();
+        return text.startsWith('Message ') && b.offsetParent !== null;
+      }) || null;
     });
 
     if (messageBtn && await messageBtn.evaluate(el => el !== null)) {
-      const desc = await messageBtn.evaluate(el =>
-        `aria-label="${el.getAttribute('aria-label') || ''}" title="${el.getAttribute('title') || ''}" text="${el.textContent.trim().substring(0, 30)}"`
-      );
-      console.log(`[compose] Found message icon button: ${desc}`);
-      await messageBtn.evaluate(el => { el.scrollIntoView({ block: 'center' }); });
-      await page.waitForTimeout(500);
-      await messageBtn.evaluate(el => el.click());
-      console.log('[compose] ✓ JS click on profile message icon executed');
-      clicked = true;
+      const btnText = await messageBtn.evaluate(el => el.textContent.trim().substring(0, 50));
+      console.log(`[compose] Found Message button: "${btnText}"`);
+
+      if (candidateName) {
+        const firstName = candidateName.split(' ')[0];
+        if (!btnText.includes(firstName)) {
+          console.log(`[compose] ⚠ Name mismatch! Expected "${firstName}" but button says "${btnText}". Retrying...`);
+          const retryLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
+          if (retryLink) {
+            await retryLink.click({ force: true });
+            await page.waitForTimeout(5000);
+          }
+          const retryBtn = await page.evaluateHandle(() => {
+            const buttons = Array.from(document.querySelectorAll('button'));
+            return buttons.find(b => b.textContent.trim().startsWith('Message ') && b.offsetParent !== null) || null;
+          });
+          if (retryBtn && await retryBtn.evaluate(el => el !== null)) {
+            const retryText = await retryBtn.evaluate(el => el.textContent.trim().substring(0, 50));
+            console.log(`[compose] Retry found: "${retryText}"`);
+            if (!retryText.includes(firstName)) {
+              throw new Error(`Profile panel shows wrong candidate: "${retryText}" (expected "${firstName}")`);
+            }
+            await retryBtn.evaluate(el => { el.scrollIntoView({ block: 'center' }); });
+            await page.waitForTimeout(500);
+            await retryBtn.evaluate(el => el.click());
+            console.log('[compose] ✓ JS click on Message button executed (after retry)');
+            clicked = true;
+          }
+        }
+      }
+
+      if (!clicked) {
+        await messageBtn.evaluate(el => { el.scrollIntoView({ block: 'center' }); });
+        await page.waitForTimeout(500);
+        await messageBtn.evaluate(el => el.click());
+        console.log('[compose] ✓ JS click on Message button executed');
+        clicked = true;
+      }
     }
   } catch (err) {
-    console.log(`[compose] Approach 1 (profile icon button) failed: ${err.message}`);
+    console.log(`[compose] Approach 1 (Message [Name] button) failed: ${err.message}`);
   }
 
   // Approach 2: Use Playwright's page.click with text selector
@@ -1713,132 +1716,48 @@ async function approveCandidate(candidateId) {
 
     await takeScreenshot('approve-profile-loaded');
 
-    // Find and click the envelope/mail icon button next to "Archive" on the profile action bar
-    let msgBtn = null;
+    // Find and click the "Message [Name]" button on the profile page
+    // This is the TEXT button (not the envelope icon which navigates to inbox)
+    console.log('[approve] Looking for "Message [Name]" button...');
 
-    // Strategy 1: Button with aria-label/title about sending a message
-    msgBtn = await page.evaluateHandle(() => {
+    // Dismiss any notification dropdown that might intercept clicks
+    await page.evaluate(() => {
+      const notif = document.querySelector('[aria-expanded="true"].notifications-menu__trigger, .notifications-menu--is-open');
+      if (notif) notif.click();
+      document.body.click();
+    });
+    await page.waitForTimeout(500);
+
+    const msgBtn = await page.evaluateHandle(() => {
       const buttons = Array.from(document.querySelectorAll('button'));
       return buttons.find(b => {
-        const label = (b.getAttribute('aria-label') || '').toLowerCase();
-        const title = (b.getAttribute('title') || '').toLowerCase();
-        const tooltip = (b.getAttribute('data-tooltip') || '').toLowerCase();
-        return (label.includes('send a message') || label.includes('send message') ||
-                title.includes('send a message') || title.includes('send message') ||
-                tooltip.includes('send a message') || tooltip.includes('send message'))
-               && b.offsetParent !== null;
+        const text = b.textContent.trim();
+        return text.startsWith('Message ') && b.offsetParent !== null;
       }) || null;
     });
-    if (msgBtn && await msgBtn.evaluate(el => el !== null)) {
-      console.log('[approve] Found message button via aria-label/title');
-    } else {
-      msgBtn = null;
-    }
 
-    // Strategy 2: Find the envelope icon button next to Archive button
-    if (!msgBtn) {
-      console.log('[approve] Trying Archive-sibling icon search...');
-      msgBtn = await page.evaluateHandle(() => {
-        const buttons = Array.from(document.querySelectorAll('button'));
-        const archiveBtn = buttons.find(b => b.textContent.trim() === 'Archive' && b.offsetParent !== null);
-        if (!archiveBtn) return null;
-        // Look at siblings after Archive — the envelope icon is the first icon button
-        let sibling = archiveBtn.nextElementSibling;
-        while (sibling) {
-          const btn = sibling.tagName === 'BUTTON' ? sibling : sibling.querySelector('button');
-          if (btn && btn.offsetParent !== null && btn.querySelector('svg, li-icon, [data-test-icon]')) {
-            return btn;
-          }
-          sibling = sibling.nextElementSibling;
-        }
-        // Also check parent's children in case they're wrapped in containers
-        const parent = archiveBtn.closest('.profile-actions, [class*="action"], [class*="toolbar"]') || archiveBtn.parentElement;
-        if (parent) {
-          const iconBtns = parent.querySelectorAll('button');
-          for (const ib of iconBtns) {
-            if (ib !== archiveBtn && ib.offsetParent !== null && ib.querySelector('svg, li-icon, [data-test-icon]')) {
-              const text = ib.textContent.trim();
-              // Skip buttons with long text (those are text buttons, not icon buttons)
-              if (text.length < 5) return ib;
-            }
-          }
-        }
-        return null;
-      });
-      if (msgBtn && await msgBtn.evaluate(el => el !== null)) {
-        console.log('[approve] Found message button next to Archive');
-      } else {
-        msgBtn = null;
-      }
-    }
-
-    // Strategy 3: Any button/link containing envelope SVG anywhere on page
-    if (!msgBtn) {
-      console.log('[approve] Trying broad SVG icon search...');
-      msgBtn = await page.evaluateHandle(() => {
-        // Look for any SVG that looks like a mail/message icon
-        const allSvgs = Array.from(document.querySelectorAll('svg, li-icon'));
-        for (const svg of allSvgs) {
-          const type = (svg.getAttribute('type') || '').toLowerCase();
-          const testIcon = (svg.getAttribute('data-test-icon') || '').toLowerCase();
-          const ariaLabel = (svg.getAttribute('aria-label') || '').toLowerCase();
-          if (type.includes('mail') || type.includes('message') || type.includes('send') ||
-              testIcon.includes('mail') || testIcon.includes('message') || testIcon.includes('send') ||
-              ariaLabel.includes('mail') || ariaLabel.includes('message')) {
-            const btn = svg.closest('button') || svg.closest('a');
-            if (btn && btn.offsetParent !== null) return btn;
-          }
-        }
-        return null;
-      });
-      if (msgBtn && await msgBtn.evaluate(el => el !== null)) {
-        console.log('[approve] Found message button via SVG icon');
-      } else {
-        msgBtn = null;
-      }
-    }
-
-    if (!msgBtn) {
-      // Log what buttons exist near Archive for debugging
-      await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button'));
-        const archiveBtn = buttons.find(b => b.textContent.trim() === 'Archive');
-        if (archiveBtn && archiveBtn.parentElement) {
-          const siblings = archiveBtn.parentElement.children;
-          console.log('[debug] Archive parent children:', Array.from(siblings).map(s =>
-            `<${s.tagName} class="${s.className}" text="${s.textContent.trim().substring(0,30)}">`
-          ));
-        }
-      });
+    if (!msgBtn || !(await msgBtn.evaluate(el => el !== null))) {
       await takeScreenshot('approve-no-message-button');
-      throw new Error('Could not find Message button on Recruiter profile page');
+      // Log all visible buttons for debugging
+      const allBtns = await page.$$('button');
+      for (let i = 0; i < allBtns.length; i++) {
+        const vis = await allBtns[i].isVisible().catch(() => false);
+        if (vis) {
+          const text = await allBtns[i].evaluate(el => el.textContent.trim().substring(0, 60));
+          if (text) console.log(`[approve] visible button[${i}]: "${text}"`);
+        }
+      }
+      throw new Error('Could not find "Message [Name]" button on profile page');
     }
 
-    // Use JS click to avoid pointer interception from nav overlays
+    const btnText = await msgBtn.evaluate(el => el.textContent.trim().substring(0, 50));
+    console.log(`[approve] Found: "${btnText}"`);
     await msgBtn.evaluate(el => { el.scrollIntoView({ block: 'center' }); });
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
     await msgBtn.evaluate(el => el.click());
     console.log('[approve] ✓ Message button clicked');
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(3000);
     await takeScreenshot('approve-after-message-click');
-
-    // Wait for compose dialog to appear — look for subject input, message body, or any new modal/dialog
-    console.log('[approve] Waiting for compose dialog...');
-    let composeReady = false;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const found = await page.$('input[name="subject"], input[placeholder*="ubject"], div[contenteditable="true"], textarea, [role="textbox"], [role="dialog"], [class*="compose"], [class*="inmail"]');
-      if (found && await found.isVisible().catch(() => false)) {
-        console.log('[approve] ✓ Compose dialog detected');
-        composeReady = true;
-        break;
-      }
-      console.log(`[approve] Compose dialog not ready, waiting... (attempt ${attempt + 1}/5)`);
-      await page.waitForTimeout(2000);
-    }
-    if (!composeReady) {
-      await takeScreenshot('approve-compose-not-found');
-      console.log('[approve] ⚠ Compose dialog not detected after 10s — proceeding anyway');
-    }
 
     const subject = candidate.subject;
     const message = candidate.tuned_message || candidate.message;
