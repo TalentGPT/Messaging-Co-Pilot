@@ -1168,11 +1168,40 @@ async function fillSubject(subject) {
 }
 
 async function fillMessageBody(message) {
+  await takeScreenshot('before-fill-message-body');
+  
+  // Check for iframes that might contain the compose dialog
+  const iframes = await page.$$('iframe');
+  console.log(`[compose] Found ${iframes.length} iframes on page`);
+  for (let i = 0; i < iframes.length; i++) {
+    const src = await iframes[i].getAttribute('src').catch(() => '') || '';
+    const name = await iframes[i].getAttribute('name').catch(() => '') || '';
+    console.log(`[compose]   iframe[${i}]: src="${src.substring(0,80)}" name="${name}"`);
+  }
+
   let el = await trySelector(page, SELECTORS.messageBody, { timeout: 8000 });
   
   if (!el) {
     // Extra attempt: look for ANY contenteditable or textarea on the page
     console.log('[compose] Standard selectors failed, scanning for any text input...');
+    
+    // Log ALL visible inputs for diagnostics
+    const allInputs = await page.$$('input, textarea, div[contenteditable="true"], [role="textbox"], [contenteditable]');
+    console.log(`[compose] Total input-like elements: ${allInputs.length}`);
+    for (let i = 0; i < allInputs.length; i++) {
+      const inp = allInputs[i];
+      const isVis = await inp.isVisible().catch(() => false);
+      if (isVis) {
+        const tag = await inp.evaluate(e => e.tagName.toLowerCase());
+        const cls = await inp.getAttribute('class') || '';
+        const aria = await inp.getAttribute('aria-label') || '';
+        const placeholder = await inp.getAttribute('placeholder') || '';
+        const name = await inp.getAttribute('name') || '';
+        const ce = await inp.getAttribute('contenteditable') || '';
+        console.log(`[compose]   visible[${i}]: <${tag}> name="${name}" ce="${ce}" aria="${aria}" placeholder="${placeholder}" class="${cls.substring(0,80)}"`);
+      }
+    }
+    
     const inputs = await page.$$('div[contenteditable="true"], textarea, [role="textbox"]');
     for (const input of inputs) {
       const isVis = await input.isVisible().catch(() => false);
