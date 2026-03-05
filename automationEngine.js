@@ -4,6 +4,7 @@ const fs = require('fs');
 const { tuneMessage } = require('./messageTuner');
 const { generateOutreachMessage } = require('./messageGenerator');
 const store = require('./store');
+const phantombuster = require('./phantombuster');
 
 const SCREENSHOT_DIR = process.env.SCREENSHOTS_DIR || './screenshots';
 const USER_DATA_DIR = process.env.USER_DATA_DIR || './browser-data';
@@ -623,11 +624,76 @@ async function extractCandidateInfo(card) {
   return info;
 }
 
-// ── Profile panel scraping ──
+// ── Profile enrichment (PhantomBuster → DOM fallback) ──
 
+/**
+ * Try to get the public /in/ URL for a candidate.
+ * First checks the card, then opens profile panel to find it.
+ */
+async function getPublicProfileUrl(card) {
+  // Check card for /in/ link first
+  try {
+    const publicLink = await card.$('a[href*="/in/"]');
+    if (publicLink) {
+      let url = await publicLink.getAttribute('href');
+      if (url && !url.startsWith('http')) url = 'https://www.linkedin.com' + url;
+      if (url && url.includes('/in/')) return url;
+    }
+  } catch {}
+
+  // Open profile panel and look for the public profile link
+  try {
+    const nameLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
+    if (!nameLink) return null;
+
+    await nameLink.click({ force: true });
+    await page.waitForTimeout(3000);
+
+    // Look for "View full profile" or /in/ link in the panel
+    const publicUrl = await page.evaluate(() => {
+      // Try various selectors for the public profile link
+      const selectors = [
+        'a[href*="/in/"]',
+        'a[data-test-public-profile]',
+        'a[class*="public-profile"]',
+        'a[aria-label*="View full profile"]',
+        'a[aria-label*="public profile"]',
+      ];
+      for (const sel of selectors) {
+        const el = document.querySelector(sel);
+        if (el && el.href && el.href.includes('/in/')) {
+          return el.href;
+        }
+      }
+      return null;
+    });
+
+    // Close the panel
+    try {
+      const backBtn = await page.$('button[aria-label="Back"], button[aria-label="Close"], [data-test-back-button]');
+      if (backBtn) {
+        await backBtn.click();
+        await page.waitForTimeout(1000);
+      } else {
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(1000);
+      }
+    } catch {}
+
+    return publicUrl;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scrape profile via PhantomBuster (primary) with DOM fallback.
+ * Uses per-user settings for API key and li_at cookie.
+ */
 async function scrapeProfilePanel(card, candidateName) {
-  console.log(`[profile] Scraping profile panel for: ${candidateName}...`);
-  const profileData = {
+  console.log(`[profile] Enriching profile for: ${candidateName}...`);
+
+  const emptyProfile = {
     location: '',
     industry: '',
     summary: '',
@@ -636,18 +702,85 @@ async function scrapeProfilePanel(card, candidateName) {
     skills: [],
   };
 
+  // Get user's PhantomBuster settings
+  const userId = _currentUserId;
+  let pbConfig = null;
+
+  if (userId) {
+    const settings = store.getSettings(userId);
+    if (settings.phantombusterApiKey && settings.linkedinLiAtCookie) {
+      pbConfig = {
+        apiKey: settings.phantombusterApiKey,
+        phantomId: settings.phantombusterPhantomId || process.env.PHANTOMBUSTER_PROFILE_SCRAPER_ID || '',
+        liAtCookie: settings.linkedinLiAtCookie,
+      };
+    }
+  }
+
+  // Fall back to env vars if no user settings
+  if (!pbConfig && process.env.PHANTOMBUSTER_API_KEY) {
+    pbConfig = {
+      apiKey: process.env.PHANTOMBUSTER_API_KEY,
+      phantomId: process.env.PHANTOMBUSTER_PROFILE_SCRAPER_ID || '',
+      liAtCookie: process.env.LINKEDIN_LI_AT_COOKIE || '',
+    };
+  }
+
+  // Strategy 1: PhantomBuster (if configured)
+  if (pbConfig && pbConfig.apiKey && pbConfig.liAtCookie && pbConfig.phantomId) {
+    try {
+      // Get the public /in/ URL
+      let publicUrl = null;
+
+      // Check if info already has a /in/ URL
+      const infoLink = await card.$('a[href*="/in/"]');
+      if (infoLink) {
+        let href = await infoLink.getAttribute('href');
+        if (href && !href.startsWith('http')) href = 'https://www.linkedin.com' + href;
+        if (href && href.includes('/in/')) publicUrl = href;
+      }
+
+      // If no /in/ URL on card, try to find it in the profile panel
+      if (!publicUrl) {
+        publicUrl = await getPublicProfileUrl(card);
+      }
+
+      if (publicUrl) {
+        console.log(`[profile] Using PhantomBuster for: ${publicUrl}`);
+        broadcast('status', { message: `Enriching ${candidateName} via PhantomBuster...` });
+
+        const enriched = await phantombuster.scrapeProfile(publicUrl, pbConfig);
+        if (enriched && (enriched.experiences?.length > 0 || enriched.summary || enriched.skills?.length > 0)) {
+          console.log(`[profile] ✓ PhantomBuster enrichment successful for ${candidateName}`);
+          return enriched;
+        }
+        console.log(`[profile] PhantomBuster returned minimal data — falling back to DOM scraping`);
+      } else {
+        console.log(`[profile] No public /in/ URL found — falling back to DOM scraping`);
+      }
+    } catch (err) {
+      console.log(`[profile] PhantomBuster failed: ${err.message} — falling back to DOM scraping`);
+    }
+  } else {
+    if (pbConfig && !pbConfig.phantomId) {
+      console.log('[profile] PhantomBuster Phantom ID not configured — using DOM scraping');
+    } else {
+      console.log('[profile] PhantomBuster not configured — using DOM scraping');
+    }
+  }
+
+  // Strategy 2: DOM scraping (fallback)
   try {
-    // Click candidate name to open profile panel
+    // Click candidate name to open profile panel (if not already open)
     const nameLink = await card.$('a[href*="/talent/profile/"]') || await card.$('a');
     if (!nameLink) {
       console.log('[profile] No name link found — skipping profile scrape');
-      return profileData;
+      return emptyProfile;
     }
 
     await nameLink.click({ force: true });
     await page.waitForTimeout(3000);
 
-    // Scrape the profile panel using page.evaluate for speed
     const scraped = await page.evaluate(() => {
       const data = {
         location: '',
@@ -658,16 +791,14 @@ async function scrapeProfilePanel(card, candidateName) {
         skills: [],
       };
 
-      // Helper: get text from first matching selector
-      const getText = (selectors, context = document) => {
+      const getText = (selectors, ctx = document) => {
         for (const sel of selectors) {
-          const el = context.querySelector(sel);
+          const el = ctx.querySelector(sel);
           if (el && el.innerText.trim()) return el.innerText.trim();
         }
         return '';
       };
 
-      // Location — LinkedIn Recruiter profile panels
       data.location = getText([
         '[data-test-candidate-location]',
         '.artdeco-entity-lockup__caption',
@@ -676,7 +807,6 @@ async function scrapeProfilePanel(card, candidateName) {
         'span[class*="locality"]',
       ]);
 
-      // Summary / About section
       data.summary = getText([
         '[class*="summary"] [class*="content"]',
         '[class*="about"] [class*="content"]',
@@ -687,7 +817,6 @@ async function scrapeProfilePanel(card, candidateName) {
         '[class*="summary-text"]',
       ]);
 
-      // Experience section — find all experience entries
       const expSelectors = [
         '[class*="experience"] li',
         '[class*="experience-section"] li',
@@ -702,45 +831,19 @@ async function scrapeProfilePanel(card, candidateName) {
         const entries = document.querySelectorAll(sel);
         if (entries.length > 0) {
           entries.forEach(entry => {
-            const title = getText([
-              '[class*="title"]',
-              '[data-test-position-title]',
-              'h3',
-              'span[class*="title"]',
-            ], entry);
-            const company = getText([
-              '[class*="company"]',
-              '[data-test-company-name]',
-              '[class*="subtitle"]',
-              'h4',
-              'span[class*="company"]',
-            ], entry);
-            const date = getText([
-              '[class*="date-range"]',
-              '[class*="dates"]',
-              'span[class*="date"]',
-              '[class*="time-period"]',
-              'time',
-            ], entry);
-            const location = getText([
-              '[class*="location"]',
-              '[class*="geo"]',
-            ], entry);
-            const description = getText([
-              '[class*="description"]',
-              '[class*="show-more"]',
-              'p',
-            ], entry);
-
+            const title = getText(['[class*="title"]', '[data-test-position-title]', 'h3', 'span[class*="title"]'], entry);
+            const company = getText(['[class*="company"]', '[data-test-company-name]', '[class*="subtitle"]', 'h4', 'span[class*="company"]'], entry);
+            const date = getText(['[class*="date-range"]', '[class*="dates"]', 'span[class*="date"]', '[class*="time-period"]', 'time'], entry);
+            const location = getText(['[class*="location"]', '[class*="geo"]'], entry);
+            const description = getText(['[class*="description"]', '[class*="show-more"]', 'p'], entry);
             if (title || company) {
               data.experiences.push({ title, company, date, location, description: description.substring(0, 500) });
             }
           });
-          break; // Found entries, stop trying selectors
+          break;
         }
       }
 
-      // Education section
       const eduSelectors = [
         '[class*="education"] li',
         '[class*="education-section"] li',
@@ -757,15 +860,12 @@ async function scrapeProfilePanel(card, candidateName) {
             const school = getText(['[class*="school"]', '[class*="name"]', 'h3', 'span:first-child'], entry);
             const degree = getText(['[class*="degree"]', '[class*="field"]', 'h4', 'span[class*="subtitle"]'], entry);
             const date = getText(['[class*="date"]', 'time', 'span[class*="date"]'], entry);
-            if (school) {
-              data.education.push({ school, degree, date });
-            }
+            if (school) data.education.push({ school, degree, date });
           });
           break;
         }
       }
 
-      // Skills section
       const skillSelectors = [
         '[class*="skill"] [class*="name"]',
         '[class*="skills"] li',
@@ -788,19 +888,17 @@ async function scrapeProfilePanel(card, candidateName) {
       return data;
     });
 
-    Object.assign(profileData, scraped);
+    Object.assign(emptyProfile, scraped);
 
-    // Log what we found
     const stats = [];
-    if (profileData.location) stats.push(`location: ${profileData.location.substring(0, 40)}`);
-    if (profileData.summary) stats.push(`summary: ${profileData.summary.length} chars`);
-    if (profileData.experiences.length) stats.push(`${profileData.experiences.length} experiences`);
-    if (profileData.education.length) stats.push(`${profileData.education.length} education`);
-    if (profileData.skills.length) stats.push(`${profileData.skills.length} skills`);
-    console.log(`[profile] ✓ Scraped: ${stats.length > 0 ? stats.join(', ') : 'minimal data only'}`);
+    if (emptyProfile.location) stats.push(`location: ${emptyProfile.location.substring(0, 40)}`);
+    if (emptyProfile.summary) stats.push(`summary: ${emptyProfile.summary.length} chars`);
+    if (emptyProfile.experiences.length) stats.push(`${emptyProfile.experiences.length} experiences`);
+    if (emptyProfile.education.length) stats.push(`${emptyProfile.education.length} education`);
+    if (emptyProfile.skills.length) stats.push(`${emptyProfile.skills.length} skills`);
+    console.log(`[profile] ✓ DOM scraped: ${stats.length > 0 ? stats.join(', ') : 'minimal data only'}`);
 
-    // Close the profile panel by clicking back/elsewhere to return to pipeline view
-    // Try pressing Escape or clicking back button
+    // Close the profile panel
     try {
       const backBtn = await page.$('button[aria-label="Back"], button[aria-label="Close"], [data-test-back-button]');
       if (backBtn) {
@@ -815,10 +913,10 @@ async function scrapeProfilePanel(card, candidateName) {
     }
 
   } catch (err) {
-    console.log(`[profile] Scrape failed for ${candidateName}: ${err.message} — continuing with basic info`);
+    console.log(`[profile] DOM scrape failed for ${candidateName}: ${err.message} — continuing with basic info`);
   }
 
-  return profileData;
+  return emptyProfile;
 }
 
 // ── Message generation ──

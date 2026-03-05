@@ -844,6 +844,69 @@ app.delete('/api/cookies/:name', authMiddleware, (req, res) => {
   res.json({ status: 'deleted', name });
 });
 
+// ── Settings Routes (PhantomBuster config, per-user) ──
+
+app.get('/api/settings', authMiddleware, (req, res) => {
+  const settings = store.getSettings(req.user.id);
+  // Mask sensitive fields for display
+  const masked = { ...settings };
+  if (masked.phantombusterApiKey) {
+    masked.phantombusterApiKey = masked.phantombusterApiKey.substring(0, 8) + '...' + masked.phantombusterApiKey.slice(-4);
+  }
+  if (masked.linkedinLiAtCookie) {
+    masked.linkedinLiAtCookie = masked.linkedinLiAtCookie.substring(0, 12) + '...' + masked.linkedinLiAtCookie.slice(-4);
+  }
+  // Return raw values exist flags for the frontend
+  masked._hasPhantombusterApiKey = !!settings.phantombusterApiKey;
+  masked._hasLinkedinLiAtCookie = !!settings.linkedinLiAtCookie;
+  res.json(masked);
+});
+
+app.put('/api/settings', authMiddleware, (req, res) => {
+  const allowedFields = [
+    'phantombusterApiKey',
+    'phantombusterPhantomId',
+    'linkedinLiAtCookie',
+    'linkedinUserAgent',
+  ];
+  const updates = {};
+  for (const field of allowedFields) {
+    if (req.body[field] !== undefined) {
+      // Allow empty string to clear a field
+      updates[field] = req.body[field] || '';
+    }
+  }
+  const settings = store.updateSettings(req.user.id, updates);
+  res.json({ status: 'updated', fields: Object.keys(updates) });
+});
+
+app.post('/api/settings/test-phantombuster', authMiddleware, async (req, res) => {
+  const settings = store.getSettings(req.user.id);
+  const apiKey = settings.phantombusterApiKey;
+  if (!apiKey) return res.status(400).json({ error: 'PhantomBuster API key not configured' });
+
+  try {
+    const fetchFn = globalThis.fetch || (await import('node-fetch')).default;
+    const response = await fetchFn('https://api.phantombuster.com/api/v2/agents/fetch-all', {
+      headers: { 'X-Phantombuster-Key': apiKey },
+    });
+    if (!response.ok) {
+      return res.status(400).json({ error: `API key invalid (HTTP ${response.status})` });
+    }
+    const agents = await response.json();
+    const profileScrapers = agents.filter(a =>
+      a.script && a.script.toLowerCase().includes('profile scraper')
+    );
+    res.json({
+      status: 'connected',
+      totalPhantoms: agents.length,
+      profileScrapers: profileScrapers.map(a => ({ id: a.id, name: a.name })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Health check (no auth)
 app.get('/health', (req, res) => res.json({
   ok: true,

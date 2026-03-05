@@ -124,6 +124,21 @@ function saveCookies(userId, cookieData) {
   saveUser(userId, ud);
 }
 
+// ── Settings management (user-scoped) ──
+
+function getSettings(userId) {
+  const ud = loadUser(userId);
+  return ud.settings || {};
+}
+
+function updateSettings(userId, updates) {
+  const ud = loadUser(userId);
+  if (!ud.settings) ud.settings = {};
+  Object.assign(ud.settings, updates);
+  saveUser(userId, ud);
+  return ud.settings;
+}
+
 // ── Run management ──
 
 function createRun(projectUrl, runMode, maxCandidates, userId, campaignId) {
@@ -235,4 +250,5 @@ module.exports = {
   getPendingCandidates, getHistory, getRunHistory,
   createCampaign, getCampaigns, getCampaign, updateCampaign, deleteCampaign,
   getCookies, saveCookies, getCandidatesByCampaign,
+  getSettings, updateSettings,
 };
