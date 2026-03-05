@@ -1693,21 +1693,70 @@ async function approveCandidate(candidateId) {
     });
     await page.waitForTimeout(500);
 
-    // Find and click message button
-    const msgBtn = await trySelector(page, SELECTORS.messageButton, { timeout: 8000 });
-    if (!msgBtn) throw new Error('Could not find Message button');
+    await takeScreenshot('approve-profile-loaded');
+
+    // Find and click message button — try multiple strategies for Recruiter profile page
+    let msgBtn = await trySelector(page, SELECTORS.messageButton, { timeout: 5000 });
+
+    // Strategy 2: JS-based search for any button containing "Message" text (Recruiter profile pages)
+    if (!msgBtn) {
+      console.log('[approve] Standard selectors failed, trying JS button search...');
+      const found = await page.evaluateHandle(() => {
+        const buttons = Array.from(document.querySelectorAll('button, a'));
+        return buttons.find(b => {
+          const text = b.textContent.trim();
+          return (text.startsWith('Message ') || text === 'Message' || text === 'InMail' || text.startsWith('InMail '))
+            && b.offsetParent !== null;
+        }) || null;
+      });
+      if (found && await found.evaluate(el => el !== null)) {
+        const btnText = await found.evaluate(el => el.textContent.trim().substring(0, 50));
+        console.log(`[approve] Found via JS search: "${btnText}"`);
+        msgBtn = found;
+      }
+    }
+
+    // Strategy 3: Look for the mail/envelope icon SVG and click its parent button
+    if (!msgBtn) {
+      console.log('[approve] Trying envelope icon search...');
+      const iconBtn = await page.evaluateHandle(() => {
+        const svgs = Array.from(document.querySelectorAll('svg[data-test-icon*="send"], svg[data-test-icon*="mail"], svg[data-test-icon*="message"], li-icon[type*="mail"], li-icon[type*="message"]'));
+        for (const svg of svgs) {
+          const btn = svg.closest('button') || svg.closest('a');
+          if (btn && btn.offsetParent !== null) return btn;
+        }
+        return null;
+      });
+      if (iconBtn && await iconBtn.evaluate(el => el !== null)) {
+        console.log('[approve] Found message button via envelope icon');
+        msgBtn = iconBtn;
+      }
+    }
+
+    if (!msgBtn) {
+      await takeScreenshot('approve-no-message-button');
+      throw new Error('Could not find Message button on Recruiter profile page');
+    }
+
     // Use JS click to avoid pointer interception from nav overlays
     await msgBtn.evaluate(el => { el.scrollIntoView({ block: 'center' }); });
     await page.waitForTimeout(300);
     await msgBtn.evaluate(el => el.click());
-    await page.waitForTimeout(2000);
+    console.log('[approve] ✓ Message button clicked');
+    await page.waitForTimeout(3000);
+    await takeScreenshot('approve-after-message-click');
 
     const subject = candidate.subject;
     const message = candidate.tuned_message || candidate.message;
 
+    console.log(`[approve] Filling subject: "${(subject || '').substring(0, 50)}"`);
+    console.log(`[approve] Filling message: ${(message || '').length} chars`);
+
     if (subject) await fillSubject(subject);
     await fillMessageBody(message);
+    await takeScreenshot('approve-message-filled');
     await clickSend();
+    console.log(`[approve] ✓ Message sent to ${candidate.name}`);
 
     store.updateCandidate(candidateId, { status: 'sent' });
     broadcast('message_sent', { candidateId, name: candidate.name });
