@@ -5,7 +5,15 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "install-browser": "npx playwright install chromium"
+    "install-browser": "npx playwright install chromium",
+    "test:unit": "cross-env TEST_MODE=1 MOCK_OPENAI=1 jest tests/unit/ --forceExit",
+    "test:integration": "cross-env TEST_MODE=1 MOCK_OPENAI=1 jest tests/integration/ --forceExit",
+    "test:e2e": "cross-env TEST_MODE=1 MOCK_OPENAI=1 jest tests/e2e/ --forceExit",
+    "test:all": "cross-env TEST_MODE=1 MOCK_OPENAI=1 node tests/run-all.js"
+  },
+  "jest": {
+    "testTimeout": 30000,
+    "testEnvironment": "node"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -16,7 +24,12 @@
     "open": "^10.1.0",
     "openai": "^4.104.0",
     "playwright": "^1.50.1",
-    "uuid": "^11.0.5",
-    "ws": "^8.18.0"
+    "uuid": "^11.0.5"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "jest": "^30.2.0",
+    "supertest": "^7.2.2",
+    "ws": "^8.19.0"
   }
 }

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>LinkedIn Recruiter Mock</title></head>
+<body>
+<div id="scenario-container">
+
+  <!-- Scenario 1: Normal candidate -->
+  <div class="row__top-card" data-scenario="normal">
+    <a href="/talent/profile/abc123" class="profile-link">
+      <span class="candidate-name">Jane Smith</span>
+    </a>
+    <a href="/in/janesmith">Jane Smith</a>
+    <span class="headline">VP of Engineering at TechCorp</span>
+    <div class="experience">
+      <li><span class="title">VP of Engineering</span><span class="company">TechCorp</span><span class="date-range">2020-2024</span></li>
+      <li><span class="title">Director of Engineering</span><span class="company">StartupXYZ</span><span class="date-range">2017-2020</span></li>
+    </div>
+    <div class="education"><li><span class="school">MIT</span><span class="degree">BS Computer Science</span></li></div>
+    <div class="skills"><li>Python</li><li>Leadership</li><li>Cloud Architecture</li></div>
+    <span class="location">San Francisco, CA</span>
+    <button data-test-send-inmail>Message Jane Smith</button>
+  </div>
+
+  <!-- Scenario 2: Empty card -->
+  <div class="row__top-card" data-scenario="empty">
+    <!-- No content -->
+  </div>
+
+  <!-- Scenario 3: Scrape failure (missing selectors) -->
+  <div class="row__top-card" data-scenario="scrape-failure">
+    <div class="broken-markup">
+      <p>This card has no standard selectors</p>
+    </div>
+  </div>
+
+  <!-- Scenario 4: Compose fallbacks (different button selectors) -->
+  <div class="row__top-card" data-scenario="compose-fallback">
+    <a href="/talent/profile/def456">
+      <span class="candidate-name">Bob Jones</span>
+    </a>
+    <span class="headline">Sales Director at BigCo</span>
+    <button aria-label="Message Bob">Message</button>
+  </div>
+
+  <!-- Scenario 5: Delayed send button -->
+  <div class="row__top-card" data-scenario="delayed-send">
+    <a href="/talent/profile/ghi789">
+      <span class="candidate-name">Alice Chen</span>
+    </a>
+    <span class="headline">CTO at ScaleUp</span>
+    <button data-test-send-inmail>Message Alice Chen</button>
+    <!-- Send button with initial disabled state -->
+    <div class="compose-dialog" style="display:none">
+      <input name="subject" placeholder="Subject line">
+      <div contenteditable="true" role="textbox" aria-label="Write a message"></div>
+      <button data-test-send-inmail-button disabled aria-disabled="true" class="artdeco-button--disabled">Send</button>
+    </div>
+  </div>
+
+  <!-- Scenario 6: InMail credits exhausted -->
+  <div class="row__top-card" data-scenario="credits-exhausted">
+    <a href="/talent/profile/jkl012">
+      <span class="candidate-name">Charlie Brown</span>
+    </a>
+    <span class="headline">Manager at Corp</span>
+    <div class="inmail-credits-exhausted">
+      <input type="checkbox"><label>Template 1</label>
+      <input type="checkbox"><label>Template 2</label>
+      <input type="checkbox"><label>Template 3</label>
+      <input type="checkbox"><label>Template 4</label>
+      <p>You have 0 InMail credits remaining</p>
+    </div>
+  </div>
+
+  <!-- Scenario 7: Already processed -->
+  <div class="row__top-card" data-scenario="already-processed">
+    <a href="/talent/profile/mno345">
+      <span class="candidate-name">Diana Prince</span>
+    </a>
+    <span class="headline">Already Contacted</span>
+    <span class="pipeline-stage">Contacted</span>
+  </div>
+
+  <!-- Scenario 8: SKIP_CANDIDATES match -->
+  <div class="row__top-card" data-scenario="skip-candidate">
+    <a href="/talent/profile/pqr678">
+      <span class="candidate-name">SkipMe Person</span>
+    </a>
+    <span class="headline">Should Be Skipped</span>
+  </div>
+
+</div>
+
+<!-- Compose dialog template -->
+<div id="compose-template" style="display:none">
+  <input name="subject" data-test-inmail-subject placeholder="Subject line">
+  <div contenteditable="true" data-test-inmail-body role="textbox"></div>
+  <button data-test-send-inmail-button>Send</button>
+  <button data-test-modal-close-btn>Discard</button>
+</div>
+
+<!-- Notification dropdown (for overlay dismiss testing) -->
+<div class="notifications-menu" data-test-notifications-dropdown-trigger>
+  <div class="notification-item">New notification</div>
+</div>
+
+<!-- Pagination -->
+<nav class="artdeco-pagination">
+  <li class="artdeco-pagination__indicator--number"><a href="#" aria-label="Page 1">1</a></li>
+  <li class="artdeco-pagination__indicator--number"><a href="#" aria-label="Page 2">2</a></li>
+  <a href="#" aria-label="Next">Next</a>
+</nav>
+
+<script>
+// Simulate delayed send button enabling
+document.addEventListener('DOMContentLoaded', () => {
+  const delayedBtn = document.querySelector('[data-scenario="delayed-send"] button[data-test-send-inmail-button]');
+  if (delayedBtn) {
+    setTimeout(() => {
+      delayedBtn.disabled = false;
+      delayedBtn.removeAttribute('aria-disabled');
+      delayedBtn.classList.remove('artdeco-button--disabled');
+    }, 2000);
+  }
+});
+</script>
+</body>
+</html>
